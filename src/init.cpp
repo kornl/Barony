@@ -281,6 +281,8 @@ int initApp(char* title, int fullscreen)
 	}
 #endif
 #endif
+	//SDL_SetWindowIcon(screen, loadImage("Barony_Icon256x256.png"));
+	SDL_SetWindowIcon(screen, IMG_LoadPNG_RW(SDL_RWFromFile("Barony_Icon256x256.png", "r")));
 
 	// load resources
 	printlog("loading engine resources...\n");
@@ -2418,6 +2420,7 @@ bool changeVideoMode()
 	}
 #endif
 	// success
+	SDL_SetWindowIcon(screen, IMG_LoadPNG_RW(SDL_RWFromFile("Barony_Icon256x256.png", "r")));
 	return true;
 }
 
