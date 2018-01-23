@@ -13,6 +13,7 @@
 #include "game.hpp"
 #include "stat.hpp"
 #include "menu.hpp"
+#include "monster.hpp"
 #include "scores.hpp"
 #include "items.hpp"
 #include "interface/interface.hpp"
@@ -28,7 +29,7 @@ bool conductFoodless = true;
 bool conductVegetarian = true;
 bool conductIlliterate = true;
 list_t booksRead;
-bool usedClass[10] = {0};
+bool usedClass[NUMCLASSES] = {0};
 Uint32 loadingsavegame = 0;
 
 /*-------------------------------------------------------------------------------
@@ -49,7 +50,8 @@ score_t* scoreConstructor()
 		printlog( "failed to allocate memory for new score!\n" );
 		exit(1);
 	}
-	score->stats = new Stat();
+	// Stat set to 0 as monster type not needed, values will be overwritten by the player data
+	score->stats = new Stat(0);
 	if ( !score->stats )
 	{
 		printlog( "failed to allocate memory for new stat!\n" );
@@ -481,7 +483,7 @@ void saveAllScores()
 		fwrite(&c, sizeof(Uint32), 1, fp);
 		fputs(book, fp);
 	}
-	for ( c = 0; c < 10; c++ )
+	for ( c = 0; c < NUMCLASSES; c++ )
 	{
 		fwrite(&usedClass[c], sizeof(bool), 1, fp);
 	}
@@ -682,9 +684,30 @@ void loadAllScores()
 		fclose(fp);
 		return;
 	}
+
 	fread(checkstr, sizeof(char), strlen(VERSION), fp);
-	if ( strncmp(checkstr, VERSION, strlen(VERSION)) )
+
+	int versionNumber = 300;
+	char versionStr[4] = "000";
+	i = 0;
+	for ( int j = 0; j < strlen(VERSION); ++j )
 	{
+		if ( checkstr[j] >= '0' && checkstr[j] <= '9' )
+		{
+			versionStr[i] = checkstr[j]; // copy all integers into versionStr.
+			++i;
+			if ( i == 3 )
+			{
+				versionStr[i] = '\0';
+				break; // written 3 characters, add termination and break loop.
+			}
+		}
+	}
+	versionNumber = atoi(versionStr); // convert from string to int.
+	printlog("notice: '%s' version number %d", SCORESFILE, versionNumber);
+	if ( versionNumber < 200 || versionNumber > 999 )
+	{
+		// if version number less than v2.0.0, or more than 3 digits, abort and rebuild scores file.
 		printlog("error: '%s' is corrupt!\n", SCORESFILE);
 		fclose(fp);
 		return;
@@ -707,9 +730,23 @@ void loadAllScores()
 		node->size = sizeof(char) * (strlen(tempstr) + 1);
 		node->deconstructor = &defaultDeconstructor;
 	}
-	for ( c = 0; c < 10; c++ )
+	for ( c = 0; c < NUMCLASSES; c++ )
 	{
-		fread(&usedClass[c], sizeof(bool), 1, fp);
+		if ( versionNumber < 300 )
+		{
+			if ( c < 10 )
+			{
+				fread(&usedClass[c], sizeof(bool), 1, fp);
+			}
+			else
+			{
+				usedClass[c] = false;
+			}
+		}
+		else
+		{
+			fread(&usedClass[c], sizeof(bool), 1, fp);
+		}
 	}
 
 	// read scores
@@ -724,7 +761,8 @@ void loadAllScores()
 			printlog( "failed to allocate memory for new score!\n" );
 			exit(1);
 		}
-		score->stats = new Stat();
+		// Stat set to 0 as monster type not needed, values will be overwritten by the savegame data
+		score->stats = new Stat(0);
 		if ( !score->stats )
 		{
 			printlog( "failed to allocate memory for new stat!\n" );
@@ -734,9 +772,27 @@ void loadAllScores()
 		node->deconstructor = &scoreDeconstructor;
 		node->size = sizeof(score_t);
 
-		for ( c = 0; c < NUMMONSTERS; c++ )
+		if ( versionNumber < 300 )
 		{
-			fread(&score->kills[c], sizeof(Sint32), 1, fp);
+			// legacy nummonsters
+			for ( c = 0; c < NUMMONSTERS; c++ )
+			{
+				if ( c < 21 )
+				{
+					fread(&score->kills[c], sizeof(Sint32), 1, fp);
+				}
+				else
+				{
+					score->kills[c] = 0;
+				}
+			}
+		}
+		else
+		{
+			for ( c = 0; c < NUMMONSTERS; c++ )
+			{
+				fread(&score->kills[c], sizeof(Sint32), 1, fp);
+			}
 		}
 		fread(&score->completionTime, sizeof(Uint32), 1, fp);
 		fread(&score->conductPenniless, sizeof(bool), 1, fp);
@@ -768,10 +824,30 @@ void loadAllScores()
 		{
 			fread(&score->stats->PROFICIENCIES[c], sizeof(Sint32), 1, fp);
 		}
-		for ( c = 0; c < NUMEFFECTS; c++ )
+		if ( versionNumber < 300 )
 		{
-			fread(&score->stats->EFFECTS[c], sizeof(bool), 1, fp);
-			fread(&score->stats->EFFECTS_TIMERS[c], sizeof(Sint32), 1, fp);
+			// legacy effects
+			for ( c = 0; c < NUMEFFECTS; c++ )
+			{
+				if ( c < 16 )
+				{
+					fread(&score->stats->EFFECTS[c], sizeof(bool), 1, fp);
+					fread(&score->stats->EFFECTS_TIMERS[c], sizeof(Sint32), 1, fp);
+				}
+				else
+				{
+					score->stats->EFFECTS[c] = false;
+					score->stats->EFFECTS_TIMERS[c] = 0;
+				}
+			}
+		}
+		else
+		{
+			for ( c = 0; c < NUMEFFECTS; c++ )
+			{
+				fread(&score->stats->EFFECTS[c], sizeof(bool), 1, fp);
+				fread(&score->stats->EFFECTS_TIMERS[c], sizeof(Sint32), 1, fp);
+			}
 		}
 
 		score->stats->leader_uid = 0;
@@ -2020,7 +2096,8 @@ list_t* loadGameFollowers()
 		int i;
 		for ( i = 0; i < numFollowers; i++ )
 		{
-			Stat* followerStats = new Stat();
+			// Stat set to 0 as monster type not needed, values will be overwritten by the saved follower data
+			Stat* followerStats = new Stat(0);
 
 			node_t* node = list_AddNodeLast(followerList);
 			node->element = followerStats;
@@ -2249,6 +2326,7 @@ char* getSaveGameName()
 	if ( (fp = fopen(SAVEGAMEFILE, "rb")) == NULL )
 	{
 		printlog("error: failed to check name in '%s'!\n", SAVEGAMEFILE);
+		free(tempstr);
 		return NULL;
 	}
 
@@ -2259,6 +2337,7 @@ char* getSaveGameName()
 	{
 		printlog("error: '%s' is corrupt!\n", SAVEGAMEFILE);
 		fclose(fp);
+		free(tempstr);
 		return NULL;
 	}
 	fread(checkstr, sizeof(char), strlen(VERSION), fp);
@@ -2266,6 +2345,7 @@ char* getSaveGameName()
 	{
 		printlog("error: '%s' is corrupt!\n", SAVEGAMEFILE);
 		fclose(fp);
+		free(tempstr);
 		return NULL;
 	}
 
@@ -2349,7 +2429,7 @@ char* getSaveGameName()
 	fread(&level, sizeof(Sint32), 1, fp);
 
 	// assemble string
-	snprintf(tempstr, 1024, language[1540 + mul], name, level, language[1900 + class_], plnum);
+	snprintf(tempstr, 1024, language[1540 + mul], name, level, playerClassLangEntry(class_), plnum);
 
 	// close file
 	fclose(fp);

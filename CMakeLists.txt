@@ -13,7 +13,7 @@ else()
   set (STEAMWORKS_ENABLED 0)
 endif()
 
-#FMOD can be disabled in one of two ways: 
+#FMOD can be disabled in one of two ways:
 # * Not having FMOD installed will automatically disable FMOD (and, consequently, the game's sound engine as a whole).
 # * Running cmake with -DFMOD_ENABLED=OFF
 set(FMOD 0) #Acts as an alias to FMOD_FOUND
@@ -59,6 +59,7 @@ if( NOT WIN32 )
   set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -ffast-math -funroll-loops -fstrict-aliasing -mcpu=cortex-a8 -mfpu=neon -mfloat-abi=softfp -g -fuse-ld=gold -fuse-linker-plugin -fsingle-precision-constant")
   else()
   set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -Wall -pg -ffast-math -funroll-loops -fstrict-aliasing")
+  #set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Wall -pg -fsanitize=address -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover -Wreturn-type -Werror=return-type")
   set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Wall -pg")
   set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O3 -ffast-math -funroll-loops -fstrict-aliasing")
   set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
@@ -300,9 +301,6 @@ if(WIN32)
     #target_link_libraries(barony -lsteamworks_cwrapper -lstdc++)
     target_link_libraries(barony -lsteam_api)
   endif()
-  if (APPLE)
-    target_link_libraries(barony ${GLUT_LIBRARIES})
-  endif()
 else()
   if("${CMAKE_SIZEOF_VOID_P}" EQUAL "8")
     # 64 bit
@@ -312,6 +310,16 @@ else()
   if (STEAMWORKS_ENABLED)
     target_link_libraries(barony ${STEAMWORKS_LIBRARY})
     #target_link_libraries(barony ${STEAMWORKS_CWRAPPER_LIBRARIES} -lstdc++)
+  endif()
+  if (APPLE)
+    target_link_libraries(barony ${GLUT_LIBRARIES})
+  endif()
+  if (${CMAKE_SYSTEM_NAME} MATCHES "BSD")
+    # For backtrace
+    find_path(EXECINFO_INC NAMES execinfo.h)
+    find_library(EXECINFO_LIB NAMES execinfo)
+    include_directories(${EXECINFO_INC})
+    target_link_libraries(barony ${EXECINFO_LIB})
   endif()
 endif()
 target_link_libraries(barony ${OPENGL_LIBRARIES})

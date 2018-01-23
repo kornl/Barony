@@ -10,6 +10,7 @@
 -------------------------------------------------------------------------------*/
 
 #include "main.hpp"
+#include "files.hpp"
 //#include "game.hpp"
 #include "sound.hpp"
 
@@ -56,6 +57,8 @@ FMOD_SOUND* endgamemusic = NULL;
 FMOD_SOUND* devilmusic = NULL;
 FMOD_SOUND* escapemusic = NULL;
 FMOD_SOUND* introductionmusic = NULL;
+FMOD_SOUND** cavesmusic = NULL;
+FMOD_SOUND** citadelmusic = NULL;
 bool levelmusicplaying = false;
 
 FMOD_CHANNEL* music_channel = NULL;
@@ -264,7 +267,7 @@ static long int openal_oggtell(void* datasource) {
 }
 
 static int openal_oggopen(OPENAL_SOUND *self, const char* oggfile) {
-	FILE *f = fopen(oggfile, "rb");
+	FILE *f = openDataFile(oggfile, "rb");
 	int err;
 
 	ov_callbacks oggcb = {openal_oggread, openal_oggseek, openal_oggclose, openal_oggtell};
@@ -391,6 +394,8 @@ OPENAL_BUFFER* endgamemusic = NULL;
 OPENAL_BUFFER* devilmusic = NULL;
 OPENAL_BUFFER* escapemusic = NULL;
 OPENAL_BUFFER* introductionmusic = NULL;
+OPENAL_BUFFER** cavesmusic = NULL;
+OPENAL_BUFFER** citadelmusic = NULL;
 bool levelmusicplaying = false;
 
 OPENAL_SOUND* music_channel = NULL;
@@ -692,7 +697,7 @@ void OPENAL_RemoveChannelGroup(OPENAL_SOUND *channel, OPENAL_CHANNELGROUP *group
 		i++;
 	if(i==group->num)
 		return;
-	memcpy(group->sounds+i, group->sounds+i+1, sizeof(OPENAL_SOUND*)*(group->num-(i+1)));
+	memmove(group->sounds+i, group->sounds+i+1, sizeof(OPENAL_SOUND*)*(group->num-(i+1)));
 	group->num--;
 }
 
@@ -700,7 +705,7 @@ int OPENAL_CreateSound(const char* name, bool b3D, OPENAL_BUFFER **buffer) {
 	*buffer = (OPENAL_BUFFER*)malloc(sizeof(OPENAL_BUFFER));
 	strcpy((*buffer)->oggfile, name);	// for debugging purpose
 	(*buffer)->stream = false;
-	FILE *f = fopen(name, "rb");
+	FILE *f = openDataFile(name, "rb");
 	if(!f) {
 		printlog("Error loading sound %s\n", name);
 		return 0;

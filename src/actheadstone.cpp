@@ -42,12 +42,12 @@ void actHeadstone(Entity* my)
 		{
 			node_t* node;
 			int goldbags = 0;
-			for ( node = map.entities->first; node != NULL; node = node->next )
+			for ( node = map.entities->first; node != nullptr; node = node->next )
 			{
 				Entity* entity = (Entity*)node->element;
 				if ( entity->sprite == 130 )   // gold bag
 				{
-					goldbags++;
+					++goldbags;
 				}
 			}
 			if ( goldbags >= 11 )
@@ -120,6 +120,14 @@ void actHeadstone(Entity* my)
 			if ( monster )
 			{
 				monster->z = 13;
+				if ( currentlevel >= 15 )
+				{
+					Stat* tmpStats = monster->getStats();
+					if ( tmpStats )
+					{
+						strcpy(tmpStats->name, "enslaved ghoul");
+					}
+				}
 			}
 		}
 	}

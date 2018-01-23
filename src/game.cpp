@@ -10,16 +10,19 @@
 -------------------------------------------------------------------------------*/
 
 #include "main.hpp"
+#include "draw.hpp"
 #include "game.hpp"
 #include "stat.hpp"
 #include "messages.hpp"
 #include "entity.hpp"
+#include "files.hpp"
 #include "menu.hpp"
 #include "classdescriptions.hpp"
 #include "interface/interface.hpp"
 #include "magic/magic.hpp"
 #include "sound.hpp"
 #include "items.hpp"
+#include "init.hpp"
 #include "shops.hpp"
 #include "monster.hpp"
 #include "scores.hpp"
@@ -43,8 +46,6 @@
 
 const unsigned STACK_SIZE = 10;
 
-
-
 void segfault_sigaction(int signal, siginfo_t* si, void* arg)
 {
 	printf("Caught segfault at address %p\n", si->si_addr);
@@ -67,6 +68,9 @@ void segfault_sigaction(int signal, siginfo_t* si, void* arg)
 
 #endif
 
+std::vector<std::string> randomPlayerNamesMale;
+std::vector<std::string> randomPlayerNamesFemale;
+
 // recommended for valgrind debugging:
 // res of 480x270
 // /nohud
@@ -75,8 +79,6 @@ void segfault_sigaction(int signal, siginfo_t* si, void* arg)
 int game = 1;
 Uint32 uniqueGameKey = 0;
 list_t steamAchievements;
-std::vector<std::string> randomPlayerNamesMale;
-std::vector<std::string> randomPlayerNamesFemale;
 
 /*-------------------------------------------------------------------------------
 
@@ -114,6 +116,10 @@ void gameLogic(void)
 	if ( secondendmoviestage > 0 )
 	{
 		secondendmovietime++;
+	}
+	if ( thirdendmoviestage > 0 )
+	{
+		thirdendmovietime++;
 	}
 
 #ifdef SOUND
@@ -241,7 +247,7 @@ void gameLogic(void)
 	// spawn flame particles on burning objects
 	if ( !gamePaused || (multiplayer && !client_disconnected[0]) )
 	{
-		for ( node = map.entities->first; node != NULL; node = node->next )
+		for ( node = map.entities->first; node != nullptr; node = node->next )
 		{
 			entity = (Entity*)node->element;
 			if ( entity->flags[BURNING] )
@@ -252,9 +258,9 @@ void gameLogic(void)
 					continue;
 				}
 				j = 1 + rand() % 4;
-				for ( c = 0; c < j; c++ )
+				for ( c = 0; c < j; ++c )
 				{
-					Entity* flame = spawnFlame(entity);
+					Entity* flame = spawnFlame(entity, SPRITE_FLAME);
 					flame->x += rand() % (entity->sizex * 2 + 1) - entity->sizex;
 					flame->y += rand() % (entity->sizey * 2 + 1) - entity->sizey;
 					flame->z += rand() % 5 - 2;
@@ -315,20 +321,20 @@ void gameLogic(void)
 		x = clientnum;
 		multiplayer = SINGLE;
 		clientnum = 0;
-		for ( node = map.entities->first; node != NULL; node = nextnode )
+		for ( node = map.entities->first; node != nullptr; node = nextnode )
 		{
 			nextnode = node->next;
 			entity = (Entity*)node->element;
-			if ( !entity->ranbehavior )
+			if ( entity && !entity->ranbehavior )
 			{
 				entity->ticks++;
-				if ( entity->behavior != NULL )
+				if ( entity->behavior != nullptr )
 				{
 					(*entity->behavior)(entity);
-					if ( entitiesdeleted.first != NULL )
+					if ( entitiesdeleted.first != nullptr )
 					{
 						entitydeletedself = false;
-						for ( node2 = entitiesdeleted.first; node2 != NULL; node2 = node2->next )
+						for ( node2 = entitiesdeleted.first; node2 != nullptr; node2 = node2->next )
 						{
 							if ( entity == (Entity*)node2->element )
 							{
@@ -351,7 +357,7 @@ void gameLogic(void)
 				}
 			}
 		}
-		for ( node = map.entities->first; node != NULL; node = node->next )
+		for ( node = map.entities->first; node != nullptr; node = node->next )
 		{
 			entity = (Entity*)node->element;
 			entity->ranbehavior = false;
@@ -401,7 +407,16 @@ void gameLogic(void)
 		{
 			for ( c = 0; c < MAXPLAYERS; c++ )
 			{
-				assailant[c] = false;
+				if ( assailantTimer[c] > 0 )
+				{
+					--assailantTimer[c];
+					//messagePlayer(0, "music cd: %d", assailantTimer[c]);
+				}
+				if ( assailant[c] == true && assailantTimer[c] <= 0 )
+				{
+					assailant[c] = false;
+					assailantTimer[c] = 0;
+				}
 			}
 
 			// animate tiles
@@ -433,14 +448,14 @@ void gameLogic(void)
 								if ( z == 0 )
 								{
 									// water and lava noises
-									if ( ticks % TICKS_PER_SECOND == (y + x * map.height) % TICKS_PER_SECOND && rand() % 3 == 0 )
+									if ( ticks % (TICKS_PER_SECOND * 4) == (y + x * map.height) % (TICKS_PER_SECOND * 4) && rand() % 3 == 0 )
 									{
 										if ( lavatiles[map.tiles[index]] )
 										{
 											// bubbling lava
 											playSoundPosLocal( x * 16 + 8, y * 16 + 8, 155, 100 );
 										}
-										else
+										else if ( swimmingtiles[map.tiles[index]] )
 										{
 											// running water
 											playSoundPosLocal( x * 16 + 8, y * 16 + 8, 135, 32 );
@@ -453,9 +468,9 @@ void gameLogic(void)
 										if ( ticks % 40 == (y + x * map.height) % 40 && rand() % 3 == 0 )
 										{
 											int c, j = 1 + rand() % 2;
-											for ( c = 0; c < j; c++ )
+											for ( c = 0; c < j; ++c )
 											{
-												Entity* entity = newEntity(42, 1, map.entities);
+												Entity* entity = newEntity(42, 1, map.entities, nullptr); //Gib entity.
 												entity->behavior = &actGib;
 												entity->x = x * 16 + rand() % 16;
 												entity->y = y * 16 + rand() % 16;
@@ -477,7 +492,7 @@ void gameLogic(void)
 												entity->roll = (rand() % 360) * PI / 180.0;
 												if ( multiplayer != CLIENT )
 												{
-													entity_uids--;
+													--entity_uids;
 												}
 												entity->setUID(-3);
 											}
@@ -506,7 +521,7 @@ void gameLogic(void)
 					}
 					if ( stats[c]->GOLD >= 10000 )
 					{
-						steamAchievementClient(i, "BARONY_ACH_FILTHY_RICH");
+						steamAchievementClient(c, "BARONY_ACH_FILTHY_RICH");
 					}
 				}
 			}
@@ -520,26 +535,26 @@ void gameLogic(void)
 
 			//if( TICKS_PER_SECOND )
 			//generatePathMaps();
-			for ( node = map.entities->first; node != NULL; node = nextnode )
+			for ( node = map.entities->first; node != nullptr; node = nextnode )
 			{
 				nextnode = node->next;
 				entity = (Entity*)node->element;
-				if ( !entity->ranbehavior )
+				if ( entity && !entity->ranbehavior )
 				{
 					if ( !gamePaused || (multiplayer && !client_disconnected[0]) )
 					{
-						entity->ticks++;
+						++entity->ticks;
 					}
-					if ( entity->behavior != NULL )
+					if ( entity->behavior != nullptr )
 					{
 						if ( !gamePaused || (multiplayer && !client_disconnected[0]) )
 						{
 							(*entity->behavior)(entity);
 						}
-						if ( entitiesdeleted.first != NULL )
+						if ( entitiesdeleted.first != nullptr )
 						{
 							entitydeletedself = false;
-							for ( node2 = entitiesdeleted.first; node2 != NULL; node2 = node2->next )
+							for ( node2 = entitiesdeleted.first; node2 != nullptr; node2 = node2->next )
 							{
 								if ( entity == (Entity*)node2->element )
 								{
@@ -561,9 +576,10 @@ void gameLogic(void)
 						}
 					}
 				}
+
 				if ( loadnextlevel == true )
 				{
-					for ( node = map.entities->first; node != NULL; node = node->next )
+					for ( node = map.entities->first; node != nullptr; node = node->next )
 					{
 						entity = (Entity*)node->element;
 						entity->flags[NOUPDATE] = true;
@@ -587,6 +603,11 @@ void gameLogic(void)
 						OPENAL_ChannelGroup_Stop(sound_group);
 					}
 #endif
+					// stop combat music
+					for ( c = 0; c < MAXPLAYERS; ++c )
+					{
+						assailantTimer[c] = 0;
+					}
 
 					// show loading message
 					loading = true;
@@ -648,7 +669,15 @@ void gameLogic(void)
 					// signal clients about level change
 					mapseed = rand();
 					lastEntityUIDs = entity_uids;
-					currentlevel++;
+					if ( skipLevelsOnLoad > 0 )
+					{
+						currentlevel += skipLevelsOnLoad;
+					}
+					else
+					{
+						++currentlevel;
+					}
+					skipLevelsOnLoad = 0;
 					if ( multiplayer == SERVER )
 					{
 						for ( c = 1; c < MAXPLAYERS; c++ )
@@ -672,11 +701,11 @@ void gameLogic(void)
 					numplayers = 0;
 					if ( !secretlevel )
 					{
-						fp = fopen(LEVELSFILE, "r");
+						fp = openDataFile(LEVELSFILE, "r");
 					}
 					else
 					{
-						fp = fopen(SECRETLEVELSFILE, "r");
+						fp = openDataFile(SECRETLEVELSFILE, "r");
 					}
 					for ( i = 0; i < currentlevel; i++ )
 						while ( fgetc(fp) != '\n' ) if ( feof(fp) )
@@ -705,7 +734,7 @@ void gameLogic(void)
 							{
 								break;
 							}
-						result = loadMap(tempstr, &map, map.entities);
+						result = loadMap(tempstr, &map, map.entities, map.creatures);
 					}
 					fclose(fp);
 					assignActions(&map);
@@ -757,6 +786,18 @@ void gameLogic(void)
 								break;
 						}
 					}
+					if ( MFLAG_DISABLETELEPORT )
+					{
+						messagePlayer(clientnum, language[2382]);
+					}
+					if ( MFLAG_DISABLELEVITATION )
+					{
+						messagePlayer(clientnum, language[2383]);
+					}
+					if ( MFLAG_DISABLEDIGGING )
+					{
+						messagePlayer(clientnum, language[2450]);
+					}
 					loadnextlevel = false;
 					loading = false;
 					fadeout = false;
@@ -783,14 +824,7 @@ void gameLogic(void)
 
 									Stat* monsterStats = (Stat*)newNode->element;
 									monsterStats->leader_uid = players[c]->entity->getUID();
-									if (strcmp(monsterStats->name, ""))
-									{
-										messagePlayer(c, language[720], monsterStats->name);
-									}
-									else
-									{
-										messagePlayer(c, language[721], language[90 + (int)monsterStats->type]);
-									}
+									messagePlayerMonsterEvent(c, 0xFFFFFFFF, *monsterStats, language[721], language[720], MSG_COMBAT);
 									if (!monsterally[HUMAN][monsterStats->type])
 									{
 										monster->flags[USERFLAG2] = true;
@@ -814,14 +848,7 @@ void gameLogic(void)
 								}
 								else
 								{
-									if ( strcmp(tempStats->name, "") )
-									{
-										messagePlayer(c, language[722], tempStats->name);
-									}
-									else
-									{
-										messagePlayer(c, language[723], language[90 + (int)tempStats->type]);
-									}
+									messagePlayerMonsterEvent(c, 0xFFFFFFFF, *tempStats, language[723], language[722], MSG_COMBAT);
 								}
 							}
 						}
@@ -832,7 +859,7 @@ void gameLogic(void)
 					break;
 				}
 			}
-			for ( node = map.entities->first; node != NULL; node = node->next )
+			for ( node = map.entities->first; node != nullptr; node = node->next )
 			{
 				entity = (Entity*)node->element;
 				entity->ranbehavior = false;
@@ -864,10 +891,10 @@ void gameLogic(void)
 				// send entity info to clients
 				if ( ticks % (TICKS_PER_SECOND / 8) == 0 )
 				{
-					for ( node = map.entities->first; node != NULL; node = node->next )
+					for ( node = map.entities->first; node != nullptr; node = node->next )
 					{
 						entity = (Entity*)node->element;
-						for ( c = 1; c < MAXPLAYERS; c++ )
+						for ( c = 1; c < MAXPLAYERS; ++c )
 						{
 							if ( !client_disconnected[c] )
 							{
@@ -1026,7 +1053,7 @@ void gameLogic(void)
 		else if ( multiplayer == CLIENT )
 		{
 			// keep alives
-			if ( multiplayer == CLIENT )
+			if ( multiplayer == CLIENT ) //lol
 			{
 				if ( ticks % (TICKS_PER_SECOND * 1) == 0 )
 				{
@@ -1144,7 +1171,7 @@ void gameLogic(void)
 											// bubbling lava
 											playSoundPosLocal( x * 16 + 8, y * 16 + 8, 155, 100 );
 										}
-										else
+										else if ( swimmingtiles[map.tiles[index]] )
 										{
 											// running water
 											playSoundPosLocal( x * 16 + 8, y * 16 + 8, 135, 32 );
@@ -1159,7 +1186,7 @@ void gameLogic(void)
 											int c, j = 1 + rand() % 2;
 											for ( c = 0; c < j; c++ )
 											{
-												Entity* entity = newEntity(42, 1, map.entities);
+												Entity* entity = newEntity(42, 1, map.entities, nullptr); //Gib entity.
 												entity->behavior = &actGib;
 												entity->x = x * 16 + rand() % 16;
 												entity->y = y * 16 + rand() % 16;
@@ -1225,11 +1252,11 @@ void gameLogic(void)
 			}
 
 			// run entity actions
-			for ( node = map.entities->first; node != NULL; node = nextnode )
+			for ( node = map.entities->first; node != nullptr; node = nextnode )
 			{
 				nextnode = node->next;
 				entity = (Entity*)node->element;
-				if ( !entity->ranbehavior )
+				if ( entity && !entity->ranbehavior )
 				{
 					if ( !gamePaused || (multiplayer && !client_disconnected[0]) )
 					{
@@ -1288,37 +1315,14 @@ void gameLogic(void)
 										}
 										clipMove(&entity->x, &entity->y, entity->vel_x, entity->vel_y, entity);
 										clipMove(&entity->new_x, &entity->new_y, entity->vel_x, entity->vel_y, entity);
-										if ( entity->behavior == &actPlayer )
+										if ( entity->behavior == &actPlayer || entity->behavior == &actMonster )
 										{
-											node_t* node2;
-											for ( node2 = map.entities->first; node2 != NULL; node2 = node2->next )
+											for (Entity *bodypart : entity->bodyparts)
 											{
-												Entity* bodypart = (Entity*)node2->element;
-												if ( bodypart->behavior == &actPlayerLimb )
-												{
-													if ( bodypart->skill[2] == entity->skill[2] )
-													{
-														bodypart->x += entity->x - ox;
-														bodypart->y += entity->y - oy;
-														bodypart->new_x += entity->new_x - onewx;
-														bodypart->new_y += entity->new_y - onewy;
-													}
-												}
-											}
-										}
-										if ( entity->behavior == &actMonster )
-										{
-											node_t* node2;
-											for ( node2 = map.entities->first; node2 != NULL; node2 = node2->next )
-											{
-												Entity* bodypart = (Entity*)node2->element;
-												if ( bodypart->skill[2] == entity->getUID() && bodypart->parent == entity->getUID() )
-												{
-													bodypart->x += entity->x - ox;
-													bodypart->y += entity->y - oy;
-													bodypart->new_x += entity->new_x - onewx;
-													bodypart->new_y += entity->new_y - onewy;
-												}
+												bodypart->x += entity->x - ox;
+												bodypart->y += entity->y - oy;
+												bodypart->new_x += entity->new_x - onewx;
+												bodypart->new_y += entity->new_y - onewy;
 											}
 										}
 									}
@@ -1386,7 +1390,7 @@ void gameLogic(void)
 					}
 				}
 			}
-			for ( node = map.entities->first; node != NULL; node = node->next )
+			for ( node = map.entities->first; node != nullptr; node = node->next )
 			{
 				entity = (Entity*)node->element;
 				entity->ranbehavior = false;
@@ -1512,7 +1516,7 @@ void handleButtons(void)
 			}
 		}
 		//Hide "Random Name" button if not on character naming screen.
-		if ( !strcmp(button->label, language[2450]) )
+		if ( !strcmp(button->label, language[2498]) )
 		{
 			if ( charcreation_step != 4 )
 			{
@@ -1753,7 +1757,7 @@ void handleEvents(void)
 				} else if (event.key.keysym.sym==SDLK_RSHIFT) { // R
 					mousestatus[SDL_BUTTON_RIGHT] = 1; // set this mouse button to 1
 					lastkeypressed = 282 + SDL_BUTTON_RIGHT;
-				} else 
+				} else
 #endif
 				{
 					lastkeypressed = event.key.keysym.scancode;
@@ -1768,7 +1772,7 @@ void handleEvents(void)
 				} else if (event.key.keysym.sym==SDLK_RSHIFT) { // R
 					mousestatus[SDL_BUTTON_RIGHT] = 0; // set this mouse button to 0
 					lastkeypressed = 282 + SDL_BUTTON_RIGHT;
-				} else 
+				} else
 #endif
 				{
 					keystatus[event.key.keysym.scancode] = 0; // set this key's index to 0
@@ -1815,7 +1819,7 @@ void handleEvents(void)
 				mousex = event.motion.x;
 				mousey = event.motion.y;
 #ifdef PANDORA
-				if(xres!=800 || yres!=480) {	// SEB Pandora 
+				if(xres!=800 || yres!=480) {	// SEB Pandora
 					mousex = (mousex*xres)/800;
 					mousey = (mousey*yres)/480;
 				}
@@ -2003,6 +2007,10 @@ void pauseGame(int mode, int ignoreplayer)
 	{
 		return;
 	}
+	if ( introstage == 9 )
+	{
+		return;
+	}
 
 	if ( (!gamePaused && mode != 1) || mode == 2 )
 	{
@@ -2090,13 +2098,21 @@ Uint32 lastGameTickCount = 0;
 bool frameRateLimit( Uint32 maxFrameRate )
 {
 	float desiredFrameMilliseconds = 1000.0f / maxFrameRate;
+
+	if ( (1000.0f / std::ceil(desiredFrameMilliseconds)) < maxFrameRate )
+	{
+		// check if our fps limiter will calculate the fps to be below the target.
+		// if below target, then set our milisecond target to be 1 less millisecond
+		desiredFrameMilliseconds = desiredFrameMilliseconds - 1;
+	}
+
 	Uint32 gameTickCount = SDL_GetTicks();
 
 	float millisecondsElapsed = (float)(gameTickCount - lastGameTickCount);
 	if ( millisecondsElapsed < desiredFrameMilliseconds )
 	{
 		// if enough time is left sleep, otherwise just keep spinning so we don't go over the limit...
-		if ( desiredFrameMilliseconds - millisecondsElapsed > 3.0f )
+		if ( desiredFrameMilliseconds - millisecondsElapsed > 5.0f )
 		{
 #ifndef WINDOWS
 			usleep( 5000 );
@@ -2118,7 +2134,7 @@ bool frameRateLimit( Uint32 maxFrameRate )
 	main
 
 	Initializes game resources, harbors main game loop, and cleans up
-	afterwords
+	afterwards
 
 -------------------------------------------------------------------------------*/
 
@@ -2184,14 +2200,7 @@ int main(int argc, char** argv)
 		//SDL_Surface *sky_bmp;
 		light_t* light;
 
-		// load default language file (english)
-		if ( loadLanguage("en") )
-		{
-			printlog("Fatal error: failed to load default language file!\n");
-			fclose(logfile);
-			exit(1);
-		}
-
+		strcpy(datadir, "./");
 		// read command line arguments
 		if ( argc > 1 )
 		{
@@ -2229,8 +2238,22 @@ int main(int argc, char** argv)
 					{
 						strcpy(classtoquickstart, argv[c] + 12);
 					}
+					else if (!strncmp(argv[c], "-datadir=", 9))
+					{
+						strcpy(datadir, argv[c] + 9);
+					}
 				}
 			}
+		}
+		printlog("Data path is %s", datadir);
+
+
+		// load default language file (english)
+		if ( loadLanguage("en") )
+		{
+			printlog("Fatal error: failed to load default language file!\n");
+			fclose(logfile);
+			exit(1);
 		}
 
 		// load config file
@@ -2281,10 +2304,13 @@ int main(int argc, char** argv)
 		initialized = true;
 
 		// initialize map
-		map.tiles = NULL;
+		map.tiles = nullptr;
 		map.entities = (list_t*) malloc(sizeof(list_t));
-		map.entities->first = NULL;
-		map.entities->last = NULL;
+		map.entities->first = nullptr;
+		map.entities->last = nullptr;
+		map.creatures = new list_t;
+		map.creatures->first = nullptr;
+		map.creatures->last = nullptr;
 
 		// instantiate a timer
 		timer = SDL_AddTimer(1000 / TICKS_PER_SECOND, timerCallback, NULL);
@@ -2359,28 +2385,28 @@ int main(int argc, char** argv)
 						switch ( rand() % 4 )
 						{
 							case 0:
-								loadMap("mainmenu1", &map, map.entities);
+								loadMap("mainmenu1", &map, map.entities, map.creatures);
 								camera.x = 8;
 								camera.y = 4.5;
 								camera.z = 0;
 								camera.ang = 0.6;
 								break;
 							case 1:
-								loadMap("mainmenu2", &map, map.entities);
+								loadMap("mainmenu2", &map, map.entities, map.creatures);
 								camera.x = 7;
 								camera.y = 4;
 								camera.z = -4;
 								camera.ang = 1.0;
 								break;
 							case 2:
-								loadMap("mainmenu3", &map, map.entities);
+								loadMap("mainmenu3", &map, map.entities, map.creatures);
 								camera.x = 5;
 								camera.y = 3;
 								camera.z = 0;
 								camera.ang = 1.0;
 								break;
 							case 3:
-								loadMap("mainmenu4", &map, map.entities);
+								loadMap("mainmenu4", &map, map.entities, map.creatures);
 								camera.x = 6;
 								camera.y = 14.5;
 								camera.z = -24;
@@ -2442,28 +2468,28 @@ int main(int argc, char** argv)
 						switch ( rand() % 4 )
 						{
 							case 0:
-								loadMap("mainmenu1", &map, map.entities);
+								loadMap("mainmenu1", &map, map.entities, map.creatures);
 								camera.x = 8;
 								camera.y = 4.5;
 								camera.z = 0;
 								camera.ang = 0.6;
 								break;
 							case 1:
-								loadMap("mainmenu2", &map, map.entities);
+								loadMap("mainmenu2", &map, map.entities, map.creatures);
 								camera.x = 7;
 								camera.y = 4;
 								camera.z = -4;
 								camera.ang = 1.0;
 								break;
 							case 2:
-								loadMap("mainmenu3", &map, map.entities);
+								loadMap("mainmenu3", &map, map.entities, map.creatures);
 								camera.x = 5;
 								camera.y = 3;
 								camera.z = 0;
 								camera.ang = 1.0;
 								break;
 							case 3:
-								loadMap("mainmenu4", &map, map.entities);
+								loadMap("mainmenu4", &map, map.entities, map.creatures);
 								camera.x = 6;
 								camera.y = 14.5;
 								camera.z = -24;
@@ -2501,9 +2527,9 @@ int main(int argc, char** argv)
 				{
 					if (strcmp(classtoquickstart, ""))
 					{
-						for ( c = 0; c < 10; c++ )
+						for ( c = 0; c < NUMCLASSES; c++ )
 						{
-							if ( !strcmp(classtoquickstart, language[1900 + c]) )
+							if ( !strcmp(classtoquickstart, playerClassLangEntry(c)) )
 							{
 								client_classes[0] = c;
 								break;
@@ -2545,9 +2571,9 @@ int main(int argc, char** argv)
 						startMessages();
 
 						// load dungeon
-						mapseed = 0;
+						mapseed = rand(); //Use prng if decide to make a quickstart for MP...
 						lastEntityUIDs = entity_uids;
-						for ( node = map.entities->first; node != NULL; node = node->next )
+						for ( node = map.entities->first; node != nullptr; node = node->next )
 						{
 							entity = (Entity*)node->element;
 							entity->flags[NOUPDATE] = true;
@@ -2556,34 +2582,55 @@ int main(int argc, char** argv)
 						{
 							if ( !secretlevel )
 							{
-								fp = fopen(LEVELSFILE, "r");
+								fp = openDataFile(LEVELSFILE, "r");
 							}
 							else
 							{
-								fp = fopen(SECRETLEVELSFILE, "r");
+								fp = openDataFile(SECRETLEVELSFILE, "r");
+							}
+							currentlevel = startfloor;
+							if ( startfloor )
+							{
+								for ( int i = 0; i < currentlevel; ++i )
+								{
+									while ( fgetc(fp) != '\n' )
+									{
+										if ( feof(fp) )
+										{
+											break;
+										}
+									}
+								}
 							}
 							fscanf(fp, "%s", tempstr);
 							while ( fgetc(fp) != ' ' ) if ( feof(fp) )
+							{
 								{
 									break;
 								}
+							}
 							if ( !strcmp(tempstr, "gen:") )
 							{
 								fscanf(fp, "%s", tempstr);
 								while ( fgetc(fp) != '\n' ) if ( feof(fp) )
+								{
 									{
 										break;
 									}
+								}
 								generateDungeon(tempstr, rand());
 							}
 							else if ( !strcmp(tempstr, "map:") )
 							{
 								fscanf(fp, "%s", tempstr);
-								while ( fgetc(fp) != '\n' ) if ( feof(fp) )
+								while ( fgetc(fp) != '\n' )
+								{
+									if ( feof(fp) )
 									{
 										break;
 									}
-								loadMap(tempstr, &map, map.entities);
+								}
+								loadMap(tempstr, &map, map.entities, map.creatures);
 							}
 							fclose(fp);
 						}
@@ -2591,7 +2638,7 @@ int main(int argc, char** argv)
 						{
 							if ( genmap == false )
 							{
-								loadMap(maptoload, &map, map.entities);
+								loadMap(maptoload, &map, map.entities, map.creatures);
 							}
 							else
 							{
@@ -2698,6 +2745,7 @@ int main(int argc, char** argv)
 							selectedShopSlot = -1;
 						}
 						attributespage = 0;
+						//proficienciesPage = 0;
 						if (openedChest[clientnum])
 						{
 							openedChest[clientnum]->closeChest();
@@ -2752,12 +2800,6 @@ int main(int argc, char** argv)
 
 				if ( !gamePaused )
 				{
-					// status bar
-					if ( !nohud )
-					{
-						drawStatus();
-					}
-
 					// interface
 					if ( (*inputPressed(impulses[IN_STATUS]) || *inputPressed(joyimpulses[INJOY_STATUS])) )
 					{
@@ -2830,6 +2872,7 @@ int main(int argc, char** argv)
 						{
 							shootmode = false;
 							attributespage = 0;
+							//proficienciesPage = 0;
 						}
 					}
 					if (!command && (*inputPressed(impulses[IN_CAST_SPELL]) || (shootmode && *inputPressed(joyimpulses[INJOY_GAME_CAST_SPELL]))))
@@ -3023,9 +3066,12 @@ int main(int argc, char** argv)
 							SDL_SetRelativeMouseMode(SDL_TRUE);
 						}
 					}
+
+					// Draw the static HUD elements
 					if ( !nohud )
 					{
-						drawMinimap();
+						drawMinimap(); // Draw the Minimap
+						drawStatus(); // Draw the Status Bar (Hotbar, Hungry/Minotaur Icons, Tooltips, etc.)
 					}
 
 					drawSustainedSpells();
@@ -3082,6 +3128,11 @@ int main(int argc, char** argv)
 								{
 									pos.y += 16;
 									drawImage(equipped_bmp, NULL, &pos);
+								}
+								else if ( selectedItem->status == BROKEN )
+								{
+									pos.y += 16;
+									drawImage(itembroken_bmp, NULL, &pos);
 								}
 							}
 							else
@@ -3190,7 +3241,7 @@ int main(int argc, char** argv)
 			}
 
 			// frame rate limiter
-			while ( frameRateLimit(MAX_FPS_LIMIT) )
+			while ( frameRateLimit(fpsLimit) )
 			{
 				if ( !intro )
 				{

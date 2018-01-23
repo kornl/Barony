@@ -13,11 +13,12 @@
 #include "game.hpp"
 #include "stat.hpp"
 #include "sound.hpp"
-#include "scores.hpp"
 #include "entity.hpp"
+#include "scores.hpp"
 #include "net.hpp"
 #include "collision.hpp"
 #include "player.hpp"
+#include "magic/magic.hpp"
 
 /*-------------------------------------------------------------------------------
 
@@ -130,26 +131,22 @@ void actLadderUp(Entity* my)
 	}
 }
 
-#define PORTAL_AMBIENCE my->skill[0]
-#define PORTAL_INIT my->skill[1]
-#define PORTAL_NOTSECRET my->skill[3]
-
 void actPortal(Entity* my)
 {
 	int playercount = 0;
 	double dist;
 	int i, c;
 
-	if ( !PORTAL_INIT )
+	if ( !my->portalInit )
 	{
-		PORTAL_INIT = 1;
+		my->portalInit = 1;
 		my->light = lightSphereShadow(my->x / 16, my->y / 16, 3, 255);
 	}
 
-	PORTAL_AMBIENCE--;
-	if ( PORTAL_AMBIENCE <= 0 )
+	my->portalAmbience--;
+	if ( my->portalAmbience <= 0 )
 	{
-		PORTAL_AMBIENCE = TICKS_PER_SECOND * 2;
+		my->portalAmbience = TICKS_PER_SECOND * 2;
 		playSoundEntityLocal( my, 154, 128 );
 	}
 
@@ -200,10 +197,10 @@ void actPortal(Entity* my)
 					{
 						case 9:
 						{
-							;
+							; //lol
 							bool visiblegrave = false;
 							node_t* node;
-							for ( node = map.entities->first; node != NULL; node = node->next )
+							for ( node = map.entities->first; node != nullptr; node = node->next )
 							{
 								Entity* entity = (Entity*)node->element;
 								if ( entity->sprite == 224 && !entity->flags[INVISIBLE] )
@@ -213,21 +210,23 @@ void actPortal(Entity* my)
 								}
 							}
 							if ( visiblegrave )
-								for ( c = 0; c < MAXPLAYERS; c++ )
+							{
+								for ( c = 0; c < MAXPLAYERS; ++c )
 								{
 									steamAchievementClient(c, "BARONY_ACH_ROBBING_THE_CRADLE");
 								}
+							}
 							break;
 						}
 						case 14:
-							for ( c = 0; c < MAXPLAYERS; c++ )
+							for ( c = 0; c < MAXPLAYERS; ++c )
 							{
 								steamAchievementClient(c, "BARONY_ACH_THESEUS_LEGACY");
 							}
 							break;
 					}
 				}
-				if ( !PORTAL_NOTSECRET )
+				if ( !my->portalNotSecret )
 				{
 					secretlevel = (secretlevel == false);  // toggle level lists
 				}
@@ -236,8 +235,6 @@ void actPortal(Entity* my)
 		}
 	}
 }
-
-#define PORTAL_VICTORYTYPE my->skill[4]
 
 void actWinningPortal(Entity* my)
 {
@@ -250,7 +247,7 @@ void actWinningPortal(Entity* my)
 		if ( my->flags[INVISIBLE] )
 		{
 			node_t* node;
-			for ( node = map.entities->first; node != NULL; node = node->next )
+			for ( node = map.creatures->first; node != nullptr; node = node->next )
 			{
 				Entity* entity = (Entity*)node->element;
 				if ( entity->behavior == &actMonster )
@@ -265,7 +262,27 @@ void actWinningPortal(Entity* my)
 					}
 				}
 			}
-			my->flags[INVISIBLE] = false;
+			if ( my->skill[28] != 0 )
+			{
+				if ( my->skill[28] == 2 )
+				{
+					// powered on.
+					if ( !my->portalFireAnimation )
+					{
+						Entity* timer = createParticleTimer(my, 100, 174);
+						timer->particleTimerCountdownAction = PARTICLE_TIMER_ACTION_SPAWN_PORTAL;
+						timer->particleTimerCountdownSprite = 174;
+						timer->particleTimerEndAction = PARTICLE_EFFECT_PORTAL_SPAWN;
+						serverSpawnMiscParticles(my, PARTICLE_EFFECT_PORTAL_SPAWN, 174);
+						my->portalFireAnimation = 1;
+					}
+				}
+			}
+			else
+			{
+				// hell map doesn't need signal.
+				my->flags[INVISIBLE] = false;
+			}
 		}
 	}
 	else
@@ -276,16 +293,16 @@ void actWinningPortal(Entity* my)
 		}
 	}
 
-	if ( !PORTAL_INIT )
+	if ( !my->portalInit )
 	{
-		PORTAL_INIT = 1;
+		my->portalInit = 1;
 		my->light = lightSphereShadow(my->x / 16, my->y / 16, 3, 255);
 	}
 
-	PORTAL_AMBIENCE--;
-	if ( PORTAL_AMBIENCE <= 0 )
+	my->portalAmbience--;
+	if ( my->portalAmbience <= 0 )
 	{
-		PORTAL_AMBIENCE = TICKS_PER_SECOND * 2;
+		my->portalAmbience = TICKS_PER_SECOND * 2;
 		playSoundEntityLocal( my, 154, 128 );
 	}
 
@@ -321,7 +338,7 @@ void actWinningPortal(Entity* my)
 						return;
 					}
 				}
-				victory = PORTAL_VICTORYTYPE;
+				victory = my->portalVictoryType;
 				if ( multiplayer == SERVER )
 				{
 					for ( c = 0; c < MAXPLAYERS; c++ )
@@ -345,6 +362,142 @@ void actWinningPortal(Entity* my)
 				{
 					pauseGame(2, false);
 				}
+				return;
+			}
+		}
+	}
+}
+
+void actMidGamePortal(Entity* my)
+{
+	if ( !my )
+	{
+		return;
+	}
+
+	my->actMidGamePortal();
+}
+
+void Entity::actMidGamePortal()
+{
+	int playercount = 0;
+	double dist;
+	int i, c;
+
+	if ( multiplayer != CLIENT )
+	{
+		if ( flags[INVISIBLE] )
+		{
+			node_t* node;
+			for ( node = map.creatures->first; node != nullptr; node = node->next )
+			{
+				Entity* entity = (Entity*)node->element;
+				if ( entity->behavior == &actMonster )
+				{
+					Stat* stats = entity->getStats();
+					if ( stats )
+					{
+						if ( stats->type == LICH )
+						{
+							return;
+						}
+					}
+				}
+			}
+			if ( circuit_status != 0 )
+			{
+				if ( circuit_status == CIRCUIT_ON )
+				{
+					// powered on.
+					if ( !portalFireAnimation )
+					{
+						Entity* timer = createParticleTimer(this, 100, 174);
+						timer->particleTimerCountdownAction = PARTICLE_TIMER_ACTION_SPAWN_PORTAL;
+						timer->particleTimerCountdownSprite = 174;
+						timer->particleTimerEndAction = PARTICLE_EFFECT_PORTAL_SPAWN;
+						serverSpawnMiscParticles(this, PARTICLE_EFFECT_PORTAL_SPAWN, 174);
+						portalFireAnimation = 1;
+					}
+				}
+			}
+		}
+	}
+	else
+	{
+		if ( flags[INVISIBLE] )
+		{
+			return;
+		}
+	}
+
+	if ( !portalInit )
+	{
+		portalInit = 1;
+		light = lightSphereShadow(x / 16, y / 16, 3, 255);
+	}
+
+	portalAmbience--;
+	if ( portalAmbience <= 0 )
+	{
+		portalAmbience = TICKS_PER_SECOND * 2;
+		playSoundEntityLocal(this, 154, 128);
+	}
+
+	yaw += 0.01; // rotate slowly on my axis
+	sprite = 614 + (this->ticks / 20) % 4; // animate
+
+	if ( multiplayer == CLIENT )
+	{
+		return;
+	}
+
+	// step through portal
+	for ( i = 0; i < MAXPLAYERS; i++ )
+	{
+		if ( (i == 0 && selectedEntity == this) || (client_selected[i] == this) )
+		{
+			if ( inrange[i] )
+			{
+				for ( c = 0; c < MAXPLAYERS; c++ )
+				{
+					if ( client_disconnected[c] || players[c] == nullptr || players[c]->entity == nullptr )
+					{
+						continue;
+					}
+					else
+					{
+						playercount++;
+					}
+					dist = sqrt(pow(x - players[c]->entity->x, 2) + pow(y - players[c]->entity->y, 2));
+					if ( dist > TOUCHRANGE )
+					{
+						messagePlayer(i, language[509]);
+						return;
+					}
+				}
+				//victory = portalVictoryType;
+				if ( multiplayer == SERVER )
+				{
+					for ( c = 0; c < MAXPLAYERS; c++ )
+					{
+						if ( client_disconnected[c] == true )
+						{
+							continue;
+						}
+						strcpy((char*)net_packet->data, "MIDG");
+						net_packet->address.host = net_clients[c - 1].host;
+						net_packet->address.port = net_clients[c - 1].port;
+						net_packet->len = 7;
+						sendPacketSafe(net_sock, -1, net_packet, c - 1);
+					}
+				}
+				subwindow = 0;
+				fadeout = true;
+				if ( !intro )
+				{
+					pauseGame(2, false);
+				}
+				introstage = 9; // prepares mid game sequence
 				return;
 			}
 		}

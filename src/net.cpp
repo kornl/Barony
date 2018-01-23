@@ -10,11 +10,13 @@
 -------------------------------------------------------------------------------*/
 
 #include "main.hpp"
+#include "draw.hpp"
 #include "game.hpp"
 #include "stat.hpp"
 #include "net.hpp"
 #include "messages.hpp"
 #include "entity.hpp"
+#include "files.hpp"
 #include "monster.hpp"
 #include "interface/interface.hpp"
 #include "magic/magic.hpp"
@@ -102,6 +104,7 @@ int sendPacketSafe(UDPsocket sock, int channel, UDPpacket* packet, int hostnum)
 	if (!(packetsend->packet = SDLNet_AllocPacket(NET_PACKET_SIZE)))
 	{
 		printlog("warning: packet allocation failed: %s\n", SDLNet_GetError());
+		free(packetsend);
 		return 0;
 	}
 
@@ -181,6 +184,10 @@ int power(int a, int b)
 
 void messagePlayer(int player, char* message, ...)
 {
+	if ( player < 0 || player >= MAXPLAYERS )
+	{
+		return;
+	}
 	char str[256] = { 0 };
 
 	va_list argptr;
@@ -229,6 +236,10 @@ void messagePlayerColor(int player, Uint32 color, char* message, ...)
 	if ( player == clientnum )
 	{
 		newString(&messages, color, str);
+		while ( list_Size(&messages) > MESSAGE_LIST_SIZE_CAP )
+		{
+			list_RemoveNode(messages.first);
+		}
 		if ( !disable_messages )
 		{
 			addMessage(color, str);
@@ -329,6 +340,10 @@ void sendEntityTCP(Entity* entity, int c)
 #endif
 	}
 	SDL_Delay(50);
+	if ( entity->clientsHaveItsStats )
+	{
+		entity->serverUpdateEffectsForEntity(false);
+	}
 }
 
 void sendEntityUDP(Entity* entity, int c, bool guarantee)
@@ -388,6 +403,10 @@ void sendEntityUDP(Entity* entity, int c, bool guarantee)
 	else
 	{
 		sendPacket(net_sock, -1, net_packet, c - 1);
+	}
+	if ( entity->clientsHaveItsStats )
+	{
+		entity->serverUpdateEffectsForEntity(false);
 	}
 }
 
@@ -614,6 +633,68 @@ void serverUpdateEntitySkill(Entity* entity, int skill)
 
 /*-------------------------------------------------------------------------------
 
+serverUpdateEntityFSkill
+
+Updates a specific entity fskill for all clients
+
+-------------------------------------------------------------------------------*/
+
+void serverUpdateEntityFSkill(Entity* entity, int fskill)
+{
+	int c;
+	if ( multiplayer != SERVER )
+	{
+		return;
+	}
+	for ( c = 1; c < MAXPLAYERS; c++ )
+	{
+		if ( !client_disconnected[c] )
+		{
+			strcpy((char*)net_packet->data, "ENFS");
+			SDLNet_Write32(entity->getUID(), &net_packet->data[4]);
+			net_packet->data[8] = fskill;
+			SDLNet_Write16(static_cast<Sint16>(entity->fskill[fskill] * 256), &net_packet->data[9]);
+			net_packet->address.host = net_clients[c - 1].host;
+			net_packet->address.port = net_clients[c - 1].port;
+			net_packet->len = 11;
+			sendPacketSafe(net_sock, -1, net_packet, c - 1);
+		}
+	}
+}
+
+/*-------------------------------------------------------------------------------
+
+serverSpawnMiscParticles
+
+Spawns misc particle effects for all clients
+
+-------------------------------------------------------------------------------*/
+
+void serverSpawnMiscParticles(Entity* entity, int particleType, int particleSprite)
+{
+	int c;
+	if ( multiplayer != SERVER )
+	{
+		return;
+	}
+	for ( c = 1; c < MAXPLAYERS; c++ )
+	{
+		if ( !client_disconnected[c] )
+		{
+			strcpy((char*)net_packet->data, "SPPE");
+			SDLNet_Write32(entity->getUID(), &net_packet->data[4]);
+			net_packet->data[8] = particleType;
+			SDLNet_Write16(particleSprite, &net_packet->data[9]);
+			net_packet->address.host = net_clients[c - 1].host;
+			net_packet->address.port = net_clients[c - 1].port;
+			net_packet->len = 12;
+			sendPacketSafe(net_sock, -1, net_packet, c - 1);
+		}
+	}
+}
+
+/*-------------------------------------------------------------------------------
+
 	serverUpdateEntityFlag
 
 	Updates a specific entity flag for all clients
@@ -673,6 +754,7 @@ void serverUpdateEffects(int player)
 	net_packet->data[4] = 0;
 	net_packet->data[5] = 0;
 	net_packet->data[6] = 0;
+	net_packet->data[7] = 0;
 	for (j = 0; j < NUMEFFECTS; j++)
 	{
 		if ( stats[player]->EFFECTS[j] == true )
@@ -682,7 +764,7 @@ void serverUpdateEffects(int player)
 	}
 	net_packet->address.host = net_clients[player - 1].host;
 	net_packet->address.port = net_clients[player - 1].port;
-	net_packet->len = 7;
+	net_packet->len = 8;
 	sendPacketSafe(net_sock, -1, net_packet, player - 1);
 }
 
@@ -719,6 +801,87 @@ void serverUpdateHunger(int player)
 
 /*-------------------------------------------------------------------------------
 
+serverUpdatePlayerStats
+
+Updates all player current HP/MP for clients
+
+-------------------------------------------------------------------------------*/
+
+void serverUpdatePlayerStats()
+{
+	int c;
+	if ( multiplayer != SERVER )
+	{
+		return;
+	}
+	for ( c = 1; c < MAXPLAYERS; c++ )
+	{
+		if ( !client_disconnected[c] )
+		{
+			strcpy((char*)net_packet->data, "STAT");
+			Sint32 playerHP = 0;
+			Sint32 playerMP = 0;
+			for ( int i = 0; i < MAXPLAYERS; ++i )
+			{
+				if ( stats[i] )
+				{
+					playerHP = static_cast<Sint16>(stats[i]->MAXHP);
+					playerHP |= static_cast<Sint16>(stats[i]->HP) << 16;
+					playerMP = static_cast<Sint16>(stats[i]->MAXMP);
+					playerMP |= static_cast<Sint16>(stats[i]->MP) << 16;
+				}
+				SDLNet_Write32(playerHP, &net_packet->data[4 + i * 8]); // 4/12/20/28 data
+				SDLNet_Write32(playerMP, &net_packet->data[8 + i * 8]); // 8/16/24/32 data
+				playerHP = 0;
+				playerMP = 0;
+			}
+			net_packet->address.host = net_clients[c - 1].host;
+			net_packet->address.port = net_clients[c - 1].port;
+			net_packet->len = 36;
+			sendPacketSafe(net_sock, -1, net_packet, c - 1);
+		}
+	}
+}
+
+/*-------------------------------------------------------------------------------
+
+serverUpdatePlayerLVL
+
+Updates all player current LVL for clients
+
+-------------------------------------------------------------------------------*/
+
+void serverUpdatePlayerLVL()
+{
+	int c;
+	if ( multiplayer != SERVER )
+	{
+		return;
+	}
+	for ( c = 1; c < MAXPLAYERS; c++ )
+	{
+		if ( !client_disconnected[c] )
+		{
+			strcpy((char*)net_packet->data, "UPLV");
+			Sint32 playerLevels = 0;
+			for ( int i = 0; i < MAXPLAYERS; ++i )
+			{
+				if ( stats[i] )
+				{
+					playerLevels |= static_cast<Uint8>(stats[i]->LVL) << (8 * i); // store uint8 in data, highest bits for player 4.
+				}
+			}
+			SDLNet_Write32(playerLevels, &net_packet->data[4]);
+			net_packet->address.host = net_clients[c - 1].host;
+			net_packet->address.port = net_clients[c - 1].port;
+			net_packet->len = 8;
+			sendPacketSafe(net_sock, -1, net_packet, c - 1);
+		}
+	}
+}
+
+/*-------------------------------------------------------------------------------
+
 	receiveEntity
 
 	receives entity data from server
@@ -730,10 +893,28 @@ Entity* receiveEntity(Entity* entity)
 	bool newentity = false;
 	int c;
 
-	if ( entity == NULL )
+	//TODO: Find out if this is needed.
+	/*bool oldeffects[NUMEFFECTS];
+	Stat* entityStats = entity->getStats();
+
+	for ( int i = 0; i < NUMEFFECTS; ++i )
+	{
+		if ( !entityStats )
+		{
+			oldeffects[i] = 0;
+		}
+		else
+		{
+			oldeffects[i] = entityStats->EFFECTS[i];
+		}
+	}
+	//Yes, it is necessary. I don't think I like this solution though, will try something else.
+	*/
+
+	if ( entity == nullptr )
 	{
 		newentity = true;
-		entity = newEntity((int)SDLNet_Read16(&net_packet->data[8]), 0, map.entities);
+		entity = newEntity((int)SDLNet_Read16(&net_packet->data[8]), 0, map.entities, nullptr);
 	}
 	else
 	{
@@ -765,7 +946,7 @@ Entity* receiveEntity(Entity* entity)
 	entity->focalx = ((char)net_packet->data[27]) / 8.0;
 	entity->focaly = ((char)net_packet->data[28]) / 8.0;
 	entity->focalz = ((char)net_packet->data[29]) / 8.0;
-	for (c = 0; c < 16; c++)
+	for (c = 0; c < 16; ++c)
 	{
 		if ( net_packet->data[34 + c / 8]&power(2, c - (c / 8) * 8) )
 		{
@@ -897,6 +1078,25 @@ void clientActions(Entity* entity)
 		case 282:
 			entity->behavior = &actSpearTrap;
 			break;
+		case 578:
+			entity->behavior = &actPowerCrystal;
+			break;
+		case 586:
+			entity->behavior = &actSwitchWithTimer;
+			break;
+		case 601:
+			entity->behavior = &actPedestalBase;
+			break;
+		case 602:
+		case 603:
+		case 604:
+		case 605:
+			entity->behavior = &actPedestalOrb;
+			break;
+		case 667:
+		case 668:
+			entity->behavior = &actBeartrap;
+			break;
 		default:
 			break;
 	}
@@ -935,6 +1135,9 @@ void clientActions(Entity* entity)
 					break;
 				case -12:
 					entity->behavior = &actMagicClientNoLight;
+					break;
+				case -13:
+					entity->behavior = &actParticleSapCenter;
 					break;
 				default:
 					break;
@@ -1098,26 +1301,52 @@ void clientHandlePacket()
 		return;
 	}
 
+	// teleport player
+	else if ( !strncmp((char*)net_packet->data, "TELM", 4) )
+	{
+		if ( players[clientnum] == nullptr || players[clientnum]->entity == nullptr )
+		{
+			return;
+		}
+		x = net_packet->data[4];
+		y = net_packet->data[5];
+		int type = net_packet->data[6];
+		players[clientnum]->entity->x = x << 4 + 8;
+		players[clientnum]->entity->y = y << 4 + 8;
+		// play sound effect
+		if ( type == 0 || type == 1 )
+		{
+			playSoundEntityLocal(players[clientnum]->entity, 96, 64);
+		}
+		else if ( type == 2 )
+		{
+			playSoundEntityLocal(players[clientnum]->entity, 154, 64);
+		}
+		return;
+	}
+
 	// delete entity
 	else if (!strncmp((char*)net_packet->data, "ENTD", 4))
 	{
-		for ( node = map.entities->first; node != NULL; node = nextnode )
+		for ( node = map.entities->first; node != nullptr; node = nextnode )
 		{
 			nextnode = node->next;
 			entity = (Entity*)node->element;
 			if ( entity->getUID() == (int)SDLNet_Read32(&net_packet->data[4]) )
 			{
-				entity2 = newEntity(entity->sprite, 1, &removedEntities);
+				entity2 = newEntity(entity->sprite, 1, &removedEntities, nullptr);
 				entity2->setUID(entity->getUID());
-				for ( j = 0; j < MAXPLAYERS; j++ )
+				for ( j = 0; j < MAXPLAYERS; ++j )
+				{
 					if (entity == players[j]->entity )
 					{
-						players[j]->entity = NULL;
+						players[j]->entity = nullptr;
 					}
+				}
 				if ( entity->light )
 				{
 					list_RemoveNode(entity->light->node);
-					entity->light = NULL;
+					entity->light = nullptr;
 				}
 				list_RemoveNode(entity->mynode);
 
@@ -1488,7 +1717,7 @@ void clientHandlePacket()
 		if ( !strcmp((char*)(&net_packet->data[8]), language[577]) )    //TODO: Replace with a UDIE packet.
 		{
 			// this is how the client knows it died...
-			Entity* entity = newEntity(-1, 1, map.entities);
+			Entity* entity = newEntity(-1, 1, map.entities, nullptr);
 			entity->x = camera.x * 16;
 			entity->y = camera.y * 16;
 			entity->z = -2;
@@ -1560,7 +1789,8 @@ void clientHandlePacket()
 		else if ( !strcmp((char*)(&net_packet->data[8]), language[1109]) )
 		{
 			// ... or lived
-			stats[clientnum]->HP = stats[clientnum]->MAXHP / 2;
+			stats[clientnum]->HP = stats[clientnum]->MAXHP * 0.5;
+			stats[clientnum]->MP = stats[clientnum]->MAXMP * 0.5;
 			stats[clientnum]->HUNGER = 500;
 			for ( c = 0; c < NUMEFFECTS; c++ )
 			{
@@ -1657,6 +1887,25 @@ void clientHandlePacket()
 		return;
 	}
 
+	// level up icon timers, sets second row of icons if double stat gain is rolled.
+	else if (!strncmp((char*)net_packet->data, "LVLI", 4))
+	{
+		// Note - set to 250 ticks, higher values will require resending/using 16 bit data.
+		stats[clientnum]->PLAYER_LVL_STAT_TIMER[STAT_STR] = (Uint8)net_packet->data[5];
+		stats[clientnum]->PLAYER_LVL_STAT_TIMER[STAT_DEX] = (Uint8)net_packet->data[6];
+		stats[clientnum]->PLAYER_LVL_STAT_TIMER[STAT_CON] = (Uint8)net_packet->data[7];
+		stats[clientnum]->PLAYER_LVL_STAT_TIMER[STAT_INT] = (Uint8)net_packet->data[8];
+		stats[clientnum]->PLAYER_LVL_STAT_TIMER[STAT_PER] = (Uint8)net_packet->data[9];
+		stats[clientnum]->PLAYER_LVL_STAT_TIMER[STAT_CHR] = (Uint8)net_packet->data[10];
+		stats[clientnum]->PLAYER_LVL_STAT_TIMER[STAT_STR + NUMSTATS] = (Uint8)net_packet->data[11];
+		stats[clientnum]->PLAYER_LVL_STAT_TIMER[STAT_DEX + NUMSTATS] = (Uint8)net_packet->data[12];
+		stats[clientnum]->PLAYER_LVL_STAT_TIMER[STAT_CON + NUMSTATS] = (Uint8)net_packet->data[13];
+		stats[clientnum]->PLAYER_LVL_STAT_TIMER[STAT_INT + NUMSTATS] = (Uint8)net_packet->data[14];
+		stats[clientnum]->PLAYER_LVL_STAT_TIMER[STAT_PER + NUMSTATS] = (Uint8)net_packet->data[15];
+		stats[clientnum]->PLAYER_LVL_STAT_TIMER[STAT_CHR + NUMSTATS] = (Uint8)net_packet->data[16];
+		return;
+	}
+
 	// killed a monster
 	else if (!strncmp((char*)net_packet->data, "MKIL", 4))
 	{
@@ -1668,6 +1917,30 @@ void clientHandlePacket()
 	else if (!strncmp((char*)net_packet->data, "SKIL", 4))
 	{
 		stats[clientnum]->PROFICIENCIES[net_packet->data[5]] = net_packet->data[6];
+
+		int statBonusSkill = getStatForProficiency(net_packet->data[5]);
+
+		if ( statBonusSkill >= STAT_STR )
+		{
+			// stat has chance for bonus point if the relevant proficiency has been trained.
+			// write the last proficiency that effected the skill.
+			stats[clientnum]->PLAYER_LVL_STAT_BONUS[statBonusSkill] = net_packet->data[5];
+		}
+
+		return;
+	}
+
+	//Add spell.
+	else if ( !strncmp((char*)net_packet->data, "ASPL", 4) )
+	{
+		if ( net_packet->len != 6 ) //Need to get the actual length, not reported...Should be a generic check at the top of the function, if len != actual len, then abort.
+		{
+			printlog("Received malformed ASPL packet.");
+			return;
+		}
+
+		addSpell(net_packet->data[5], clientnum);
+
 		return;
 	}
 
@@ -1678,6 +1951,31 @@ void clientHandlePacket()
 		return;
 	}
 
+	// update player stat values
+	else if ( !strncmp((char*)net_packet->data, "STAT", 4) )
+	{
+		Sint32 buffer = 0;
+		for ( int i = 0; i < MAXPLAYERS; ++i )
+		{
+			buffer = (Sint32)SDLNet_Read32(&net_packet->data[4 + i * 8]);
+			stats[i]->MAXHP = buffer & 0xFFFF;
+			stats[i]->HP = (buffer >> 16) & 0xFFFF;
+			buffer = (Sint32)SDLNet_Read32(&net_packet->data[8 + i * 8]);
+			stats[i]->MAXMP = buffer & 0xFFFF;
+			stats[i]->MP = (buffer >> 16) & 0xFFFF;
+		}
+	}
+
+	// update player levels
+	else if ( !strncmp((char*)net_packet->data, "UPLV", 4) )
+	{
+		Sint32 buffer = SDLNet_Read32(&net_packet->data[4]);
+		for ( int i = 0; i < MAXPLAYERS; ++i )
+		{
+			stats[i]->LVL = static_cast<Sint32>((buffer >> (i * 8) ) & 0xFF);
+		}
+	}
+
 	// current game level
 	else if (!strncmp((char*)net_packet->data, "LVLC", 4))
 	{
@@ -1685,6 +1983,15 @@ void clientHandlePacket()
 		{
 			// the server's just doing a routine check
 			return;
+		}
+
+		if ( introstage == 9 )
+		{
+			thirdendmovietime = 0;
+			movie = false; // allow normal pause screen.
+			thirdendmoviestage = 0;
+			introstage = 1; // return to normal game functionality
+			pauseGame(1, false); // unpause game
 		}
 
 		// hack to fix these things from breaking everything...
@@ -1741,13 +2048,13 @@ void clientHandlePacket()
 		printlog("Received order to change level.\n");
 		currentlevel = net_packet->data[13];
 		list_FreeAll(&removedEntities);
-		for ( node = map.entities->first; node != NULL; node = node->next )
+		for ( node = map.entities->first; node != nullptr; node = node->next )
 		{
 			entity = (Entity*)node->element;
-			entity2 = newEntity(entity->sprite, 1, &removedEntities);
+			entity2 = newEntity(entity->sprite, 1, &removedEntities, nullptr);
 			entity2->setUID(entity->getUID());
 		}
-		for ( i = 0; i < MAXPLAYERS; i++ )
+		for ( i = 0; i < MAXPLAYERS; ++i )
 		{
 			list_FreeAll(&stats[i]->FOLLOWERS);
 		}
@@ -1767,11 +2074,11 @@ void clientHandlePacket()
 		printlog("Received map seed: %d. Entity UID start: %d\n", mapseed, entity_uids);
 		if ( !secretlevel )
 		{
-			fp = fopen(LEVELSFILE, "r");
+			fp = openDataFile(LEVELSFILE, "r");
 		}
 		else
 		{
-			fp = fopen(SECRETLEVELSFILE, "r");
+			fp = openDataFile(SECRETLEVELSFILE, "r");
 		}
 		for ( i = 0; i < currentlevel; i++ )
 			while ( fgetc(fp) != '\n' ) if ( feof(fp) )
@@ -1799,13 +2106,13 @@ void clientHandlePacket()
 				{
 					break;
 				}
-			result = loadMap(tempstr, &map, map.entities);
+			result = loadMap(tempstr, &map, map.entities, map.creatures);
 		}
 		fclose(fp);
 		numplayers = 0;
 		assignActions(&map);
 		generatePathMaps();
-		for ( node = map.entities->first; node != NULL; node = nextnode )
+		for ( node = map.entities->first; node != nullptr; node = nextnode )
 		{
 			nextnode = node->next;
 			Entity* entity = (Entity*)node->element;
@@ -1865,7 +2172,18 @@ void clientHandlePacket()
 					break;
 			}
 		}
-
+		if ( MFLAG_DISABLETELEPORT )
+		{
+			messagePlayer(clientnum, language[2382]);
+		}
+		if ( MFLAG_DISABLELEVITATION )
+		{
+			messagePlayer(clientnum, language[2383]);
+		}
+		if ( MFLAG_DISABLEDIGGING )
+		{
+			messagePlayer(clientnum, language[2450]);
+		}
 		loading = false;
 		fadeout = false;
 		fadealpha = 255;
@@ -1880,6 +2198,75 @@ void clientHandlePacket()
 		Sint16 z = (Sint16)SDLNet_Read16(&net_packet->data[8]);
 		Uint32 sprite = (Uint32)SDLNet_Read32(&net_packet->data[10]);
 		spawnMagicEffectParticles( x, y, z, sprite );
+		return;
+	}
+
+	// spawn misc particle effect 
+	else if ( !strncmp((char*)net_packet->data, "SPPE", 4) )
+	{
+		i = (int)SDLNet_Read32(&net_packet->data[4]);
+		for ( node = map.entities->first; node != nullptr; node = node->next )
+		{
+			entity = (Entity*)node->element;
+			if ( entity->getUID() == i )
+			{
+				int particleType = static_cast<int>(net_packet->data[8]);
+				int sprite = static_cast<int>(SDLNet_Read16(&net_packet->data[9]));
+				switch ( particleType )
+				{
+					case PARTICLE_EFFECT_ABILITY_PURPLE:
+						createParticleDot(entity);
+						break;
+					case PARTICLE_EFFECT_ABILITY_ROCK:
+						createParticleRock(entity);
+						break;
+					case PARTICLE_EFFECT_SHADOW_INVIS:
+						createParticleDropRising(entity, sprite, 1.0);
+						break;
+					case PARTICLE_EFFECT_INCUBUS_TELEPORT_STEAL:
+					{
+						Entity* spellTimer = createParticleTimer(entity, 80, sprite);
+						spellTimer->particleTimerCountdownAction = PARTICLE_TIMER_ACTION_SHOOT_PARTICLES;
+						spellTimer->particleTimerCountdownSprite = sprite;
+						spellTimer->particleTimerPreDelay = 40;
+					}
+						break;
+					case PARTICLE_EFFECT_INCUBUS_TELEPORT_TARGET:
+					{
+						Entity* spellTimer = createParticleTimer(entity, 40, sprite);
+						spellTimer->particleTimerCountdownAction = PARTICLE_TIMER_ACTION_SHOOT_PARTICLES;
+						spellTimer->particleTimerCountdownSprite = sprite;
+					}
+						break;
+					case PARTICLE_EFFECT_SHADOW_TELEPORT:
+					{
+						Entity* spellTimer = createParticleTimer(entity, 40, sprite);
+						spellTimer->particleTimerCountdownAction = PARTICLE_TIMER_ACTION_SHOOT_PARTICLES;
+						spellTimer->particleTimerCountdownSprite = sprite;
+					}
+					break;
+					case PARTICLE_EFFECT_ERUPT:
+						createParticleErupt(entity, sprite);
+						break;
+					case PARTICLE_EFFECT_VAMPIRIC_AURA:
+						createParticleDropRising(entity, sprite, 0.5);
+						break;
+					case PARTICLE_EFFECT_RISING_DROP:
+						createParticleDropRising(entity, sprite, 1.0);
+						break;
+					case PARTICLE_EFFECT_PORTAL_SPAWN:
+					{
+						Entity* spellTimer = createParticleTimer(entity, 100, sprite);
+						spellTimer->particleTimerCountdownAction = PARTICLE_TIMER_ACTION_SPAWN_PORTAL;
+						spellTimer->particleTimerCountdownSprite = 174;
+						spellTimer->particleTimerEndAction = PARTICLE_EFFECT_PORTAL_SPAWN;
+					}
+						break;
+					default:
+						break;
+				}
+			}
+		}
 		return;
 	}
 
@@ -1987,11 +2374,83 @@ void clientHandlePacket()
 		return;
 	}
 
+	// bless one piece of my equipment
+	else if (!strncmp((char*)net_packet->data, "BLE1", 4))
+	{
+		Uint32 chosen = static_cast<Uint32>(SDLNet_Read32(&net_packet->data[4]));
+		switch ( chosen )
+		{
+			case 0:
+				if ( stats[clientnum]->helmet )
+				{
+					stats[clientnum]->helmet->beatitude++;
+				}
+				break;
+			case 1:
+				if ( stats[clientnum]->breastplate )
+				{
+					stats[clientnum]->breastplate->beatitude++;
+				}
+				break;
+			case 2:
+				if ( stats[clientnum]->gloves )
+				{
+					stats[clientnum]->gloves->beatitude++;
+				}
+				break;
+			case 3:
+				if ( stats[clientnum]->shoes )
+				{
+					stats[clientnum]->shoes->beatitude++;
+				}
+				break;
+			case 4:
+				if ( stats[clientnum]->shield )
+				{
+					stats[clientnum]->shield->beatitude++;
+				}
+				break;
+			case 5:
+				if ( stats[clientnum]->weapon )
+				{
+					stats[clientnum]->weapon->beatitude++;
+				}
+				break;
+			case 6:
+				if ( stats[clientnum]->cloak )
+				{
+					stats[clientnum]->cloak->beatitude++;
+				}
+				break;
+			case 7:
+				if ( stats[clientnum]->amulet )
+				{
+					stats[clientnum]->amulet->beatitude++;
+				}
+				break;
+			case 8:
+				if ( stats[clientnum]->ring )
+				{
+					stats[clientnum]->ring->beatitude++;
+				}
+				break;
+			case 9:
+				if ( stats[clientnum]->mask )
+				{
+					stats[clientnum]->mask->beatitude++;
+				}
+				break;
+			default:
+				break;
+		}
+		return;
+	}
+
 	// update entity appearance (sprite)
 	else if (!strncmp((char*)net_packet->data, "ENTA", 4))
 	{
 		i = (int)SDLNet_Read32(&net_packet->data[4]);
-		for ( node = map.entities->first; node != NULL; node = node->next )
+		for ( node = map.entities->first; node != nullptr; node = node->next )
 		{
 			entity = (Entity*)node->element;
 			if ( entity->getUID() == i )
@@ -2006,18 +2465,18 @@ void clientHandlePacket()
 	else if (!strncmp((char*)net_packet->data, "BDYI", 4))
 	{
 		i = (int)SDLNet_Read32(&net_packet->data[4]);
-		for ( node = map.entities->first; node != NULL; node = node->next )
+		for ( node = map.entities->first; node != nullptr; node = node->next )
 		{
 			entity = (Entity*)node->element;
 			if ( entity->getUID() == i )
 			{
 				node_t* tempNode;
 				int c;
-				for ( c = 0, tempNode = entity->children.first; tempNode != NULL; tempNode = tempNode->next, c++ )
+				for ( c = 0, tempNode = entity->children.first; tempNode != nullptr; tempNode = tempNode->next, c++ )
 				{
 					if ( c < 1 || (c < 2 && entity->behavior == &actMonster) )
 					{
-						return;
+						continue;
 					}
 					Entity* tempEntity = (Entity*)tempNode->element;
 					if ( entity->behavior == &actMonster )
@@ -2049,7 +2508,7 @@ void clientHandlePacket()
 	else if (!strncmp((char*)net_packet->data, "ENTB", 4))
 	{
 		i = (Uint32)SDLNet_Read32(&net_packet->data[4]);
-		for ( node = map.entities->first; node != NULL; node = node->next )
+		for ( node = map.entities->first; node != nullptr; node = node->next )
 		{
 			entity = (Entity*)node->element;
 			if ( entity->getUID() == i )
@@ -2071,7 +2530,7 @@ void clientHandlePacket()
 	else if (!strncmp((char*)net_packet->data, "ENTS", 4))
 	{
 		i = (int)SDLNet_Read32(&net_packet->data[4]);
-		for ( node = map.entities->first; node != NULL; node = node->next )
+		for ( node = map.entities->first; node != nullptr; node = node->next )
 		{
 			entity = (Entity*)node->element;
 			if ( entity->getUID() == i )
@@ -2082,11 +2541,26 @@ void clientHandlePacket()
 		return;
 	}
 
+	// update entity fskill
+	else if ( !strncmp((char*)net_packet->data, "ENFS", 4) )
+	{
+		i = (int)SDLNet_Read32(&net_packet->data[4]);
+		for ( node = map.entities->first; node != nullptr; node = node->next )
+		{
+			entity = (Entity*)node->element;
+			if ( entity->getUID() == i )
+			{
+				entity->fskill[net_packet->data[8]] = (SDLNet_Read16(&net_packet->data[9]) / 256.0);
+			}
+		}
+		return;
+	}
+
 	// update entity flag
 	else if (!strncmp((char*)net_packet->data, "ENTF", 4))
 	{
 		i = (int)SDLNet_Read32(&net_packet->data[4]);
-		for ( node = map.entities->first; node != NULL; node = node->next )
+		for ( node = map.entities->first; node != nullptr; node = node->next )
 		{
 			entity = (Entity*)node->element;
 			if ( entity->getUID() == i )
@@ -2102,7 +2576,7 @@ void clientHandlePacket()
 	{
 		client_keepalive[0] = ticks; // don't timeout
 		i = (int)SDLNet_Read32(&net_packet->data[4]);
-		for ( node = map.entities->first; node != NULL; node = nextnode )
+		for ( node = map.entities->first; node != nullptr; node = nextnode )
 		{
 			nextnode = node->next;
 			entity2 = (Entity*)node->element;
@@ -2163,21 +2637,21 @@ void clientHandlePacket()
 	}
 
 	//Multiplayer chest code (client).
-	else if (!strncmp((char*)net_packet->data, "CHST", 4))
+	else if ( !strncmp((char*)net_packet->data, "CHST", 4) )
 	{
 		i = (int)SDLNet_Read32(&net_packet->data[4]);
 
-		if (openedChest[clientnum])
+		if ( openedChest[clientnum] )
 		{
 			//Close the chest.
 			closeChestClientside();
 		}
 
-		for (node = map.entities->first; node != NULL; node = nextnode)
+		for ( node = map.entities->first; node != nullptr; node = nextnode )
 		{
 			nextnode = node->next;
 			entity2 = (Entity*)node->element;
-			if (entity2->getUID() == i)
+			if ( entity2->getUID() == i )
 			{
 				openedChest[clientnum] = entity2; //Set the opened chest to this.
 				if ( removecursegui_active )
@@ -2295,14 +2769,24 @@ void clientHandlePacket()
 	}
 
 	// boss death
-	else if (!strncmp((char*)net_packet->data, "BDTH", 4))
+	else if ( !strncmp((char*)net_packet->data, "BDTH", 4) )
 	{
-		for ( node = map.entities->first; node != NULL; node = node->next )
+		for ( node = map.entities->first; node != nullptr; node = node->next )
 		{
 			Entity* entity = (Entity*)node->element;
-			if ( entity->behavior == &actWinningPortal )
+			if ( strstr(map.name, "Hell") )
 			{
-				entity->flags[INVISIBLE] = false;
+				if ( entity->behavior == &actWinningPortal )
+				{
+					entity->flags[INVISIBLE] = false;
+				}
+			}
+			else if ( strstr(map.name, "Boss") )
+			{
+				if ( entity->behavior == &actPedestalBase )
+				{
+					entity->pedestalInit = 1;
+				}
 			}
 		}
 		if ( strstr(map.name, "Hell") )
@@ -2395,6 +2879,80 @@ void clientHandlePacket()
 		{
 			pauseGame(2, false);
 		}
+		return;
+	}
+
+	// mid game movie
+	else if ( !strncmp((char*)net_packet->data, "MIDG", 4) )
+	{
+		subwindow = 0;
+		fadeout = true;
+		if ( !intro )
+		{
+			pauseGame(2, false);
+		}
+		introstage = 9; // prepares mid game sequence
+		return;
+	}
+
+	// mid game jump level
+	else if ( !strncmp((char*)net_packet->data, "MIDJ", 4) )
+	{
+		subwindow = 0;
+		fadeout = true;
+		if ( !intro )
+		{
+			pauseGame(2, false);
+		}
+		introstage = 9; // prepares mid game sequence
+		return;
+	}
+
+	else if ( !strncmp((char*)net_packet->data, "EFFE", 4))
+	{
+		/*
+		 * Packet breakdown:
+		 * [0][1][2][3]: "EFFE"
+		 * [4][5][6][7]: Entity's UID.
+		 * [8][9][10][11]: Entity's effects.
+		 */
+
+		Uint32 uid = static_cast<int>(SDLNet_Read32(&net_packet->data[4]));
+
+		Entity* entity = map.getEntityWithUID(uid);
+
+		if ( entity )
+		{
+			if ( entity->behavior == &actPlayer && entity->skill[2] == clientnum )
+			{
+				//Don't update this client's entity! Use the dedicated function for that.
+				return;
+			}
+
+			Stat *stats = entity->getStats();
+			if ( !stats )
+			{
+				entity->giveClientStats();
+				stats = entity->getStats();
+				if ( !stats )
+				{
+					return;
+				}
+			}
+
+			for ( int i = 0; i < NUMEFFECTS; ++i )
+			{
+				if ( net_packet->data[8 + i / 8]&power(2, i - (i / 8) * 8) )
+				{
+					stats->EFFECTS[i] = true;
+				}
+				else
+				{
+					stats->EFFECTS[i] = false;
+				}
+			}
+		}
+
 		return;
 	}
 
@@ -2541,7 +3099,7 @@ void serverHandlePacket()
 		int x = net_packet->data[4];
 		Uint32 uid = SDLNet_Read32(&net_packet->data[5]);
 		bool foundit = false;
-		for ( node = map.entities->first; node != NULL; node = node->next )
+		for ( node = map.entities->first; node != nullptr; node = node->next )
 		{
 			entity = (Entity*)node->element;
 			if ( entity->getUID() == uid )
@@ -2600,7 +3158,7 @@ void serverHandlePacket()
 		dist = sqrt( dx * dx + dy * dy );
 
 		// make water passable
-		for ( node = map.entities->first; node != NULL; node = node->next )
+		for ( node = map.entities->first; node != nullptr; node = node->next )
 		{
 			Entity* tempentity = (Entity*)node->element;
 			if ( tempentity->sprite == 28 && tempentity->flags[SPRITE] == true )
@@ -2625,7 +3183,7 @@ void serverHandlePacket()
 		}
 
 		// make water unpassable
-		for ( node = map.entities->first; node != NULL; node = node->next )
+		for ( node = map.entities->first; node != nullptr; node = node->next )
 		{
 			Entity* tempentity = (Entity*)node->element;
 			if ( tempentity->sprite == 28 && tempentity->flags[SPRITE] == true )
@@ -2640,7 +3198,7 @@ void serverHandlePacket()
 	// tried to update
 	else if (!strncmp((char*)net_packet->data, "NOUP", 4))
 	{
-		for ( node = map.entities->first; node != NULL; node = node->next )
+		for ( node = map.entities->first; node != nullptr; node = node->next )
 		{
 			Entity* tempEntity = (Entity*)node->element;
 			if (tempEntity->getUID() == SDLNet_Read32(&net_packet->data[5]))
@@ -2670,7 +3228,7 @@ void serverHandlePacket()
 	else if (!strncmp((char*)net_packet->data, "CKIR", 4))
 	{
 		client_keepalive[net_packet->data[4]] = ticks;
-		for (node = map.entities->first; node != NULL; node = node->next)
+		for (node = map.entities->first; node != nullptr; node = node->next)
 		{
 			entity = (Entity*)node->element;
 			if (entity->getUID() == SDLNet_Read32(&net_packet->data[5]))
@@ -2686,7 +3244,7 @@ void serverHandlePacket()
 	// clicked entity out of range
 	else if (!strncmp((char*)net_packet->data, "CKOR", 4))
 	{
-		for (node = map.entities->first; node != NULL; node = node->next)
+		for (node = map.entities->first; node != nullptr; node = node->next)
 		{
 			entity = (Entity*)node->element;
 			if (entity->getUID() == SDLNet_Read32(&net_packet->data[5]))
@@ -2764,7 +3322,7 @@ void serverHandlePacket()
 	{
 		client_keepalive[net_packet->data[4]] = ticks;
 		j = net_packet->data[4]; // player number
-		for (node = map.entities->first; node != NULL; node = node->next)
+		for (node = map.entities->first; node != nullptr; node = node->next)
 		{
 			entity = (Entity*)node->element;
 			if (entity->getUID() == SDLNet_Read32(&net_packet->data[5]))
@@ -2789,7 +3347,7 @@ void serverHandlePacket()
 	else if (!strncmp((char*)net_packet->data, "DIEI", 4))
 	{
 		item = newItem(static_cast<ItemType>(SDLNet_Read32(&net_packet->data[4])), static_cast<Status>(SDLNet_Read32(&net_packet->data[8])), SDLNet_Read32(&net_packet->data[12]), SDLNet_Read32(&net_packet->data[16]), SDLNet_Read32(&net_packet->data[20]), net_packet->data[24], &stats[net_packet->data[25]]->inventory);
-		entity = newEntity(-1, 1, map.entities);
+		entity = newEntity(-1, 1, map.entities, nullptr); //Item entity.
 		entity->x = net_packet->data[26];
 		entity->x = entity->x * 16 + 8;
 		entity->y = net_packet->data[27];
@@ -2809,6 +3367,13 @@ void serverHandlePacket()
 	else if (!strncmp((char*)net_packet->data, "SHLD", 4))
 	{
 		stats[net_packet->data[4]]->defending = net_packet->data[5];
+		return;
+	}
+
+	// sneaking
+	else if ( !strncmp((char*)net_packet->data, "SNEK", 4) )
+	{
+		stats[net_packet->data[4]]->sneaking = net_packet->data[5];
 		return;
 	}
 
@@ -2861,7 +3426,7 @@ void serverHandlePacket()
 		{
 			nextnode = node->next;
 			Item* item2 = (Item*)node->element;
-			if (!itemCompare(item, item2))
+			if (!itemCompare(item, item2, false))
 			{
 				printlog("client %d bought item from shop (uid=%d)\n", client, uidnum);
 				consumeItem(item2);
@@ -2870,7 +3435,7 @@ void serverHandlePacket()
 		}
 		entitystats->GOLD += item->buyValue(client);
 		stats[client]->GOLD -= item->buyValue(client);
-		if (rand() % 2)
+		if (rand() % 2 && item->type != GEM_GLASS )
 		{
 			players[client]->entity->increaseSkill(PRO_TRADING);
 		}
@@ -2925,7 +3490,7 @@ void serverHandlePacket()
 		}
 		printlog("client %d sold item to shop (uid=%d)\n", client, uidnum);
 		stats[client]->GOLD += item->sellValue(client);
-		if (rand() % 2)
+		if (rand() % 2 && item->type != GEM_GLASS )
 		{
 			players[client]->entity->increaseSkill(PRO_TRADING);
 		}
@@ -2970,7 +3535,7 @@ void serverHandlePacket()
 	{
 		if (players[net_packet->data[4]] && players[net_packet->data[4]]->entity)
 		{
-			players[net_packet->data[4]]->entity->attack(net_packet->data[5], net_packet->data[6]);
+			players[net_packet->data[4]]->entity->attack(net_packet->data[5], net_packet->data[6], nullptr);
 		}
 		return;
 	}
@@ -3101,14 +3666,52 @@ void serverHandlePacket()
 				item = stats[player]->mask;
 				break;
 			default:
-				item = NULL;
+				item = nullptr;
 				break;
 		}
-		if ( item != NULL )
+		if ( item != nullptr )
 		{
 			item->beatitude = 0;
 		}
 		return;
+	}
+
+	// client dropped gold
+	else if (!strncmp((char*)net_packet->data, "DGLD", 4))
+	{
+		int player = net_packet->data[4];
+		int amount = SDLNet_Read32(&net_packet->data[5]);
+		stats[player]->GOLD -= amount;
+
+		//Drop gold.
+		int x = std::min<int>(std::max(0, (int)(players[player]->entity->x / 16)), map.width - 1);
+		int y = std::min<int>(std::max(0, (int)(players[player]->entity->y / 16)), map.height - 1);
+		if ( map.tiles[y * MAPLAYERS + x * MAPLAYERS * map.height] )
+		{
+			entity = newEntity(130, 0, map.entities, nullptr); // 130 = goldbag model
+			entity->sizex = 4;
+			entity->sizey = 4;
+			entity->x = players[player]->entity->x;
+			entity->y = players[player]->entity->y;
+			entity->z = 6;
+			entity->yaw = (rand() % 360) * PI / 180.0;
+			entity->flags[PASSABLE] = true;
+			entity->flags[UPDATENEEDED] = true;
+			entity->behavior = &actGoldBag;
+			entity->skill[0] = amount; // amount
+		}
+
+		return;
+	}
+
+	// the client asked for a level up
+	else if ( !strncmp((char*)net_packet->data, "CLVL", 4) )
+	{
+		int player = net_packet->data[4];
+		if ( players[player] && players[player]->entity )
+		{
+			players[player]->entity->getStats()->EXP += 100;
+		}
 	}
 }
 

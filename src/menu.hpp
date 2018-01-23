@@ -31,6 +31,8 @@ extern int firstendmovietime;
 extern int firstendmoviestage;
 extern int secondendmovietime;
 extern int secondendmoviestage;
+extern int thirdendmoviestage;
+extern int thirdendmovietime;
 extern real_t drunkextend;
 extern bool losingConnection[4];
 extern int rebindaction;
@@ -97,6 +99,7 @@ extern Sint32 slidery, slidersize, oslidery;
 
 // settings window
 extern Uint32 settings_fov;
+extern Uint32 settings_fps;
 extern int settings_xres, settings_yres;
 extern bool settings_smoothlighting;
 extern int settings_fullscreen, settings_shaking, settings_bobbing;
@@ -120,6 +123,8 @@ extern int menuselect;
 extern bool colorblind;
 extern bool right_click_protect;
 extern bool settings_auto_hotbar_new_items;
+extern bool settings_auto_hotbar_categories[NUM_HOTBAR_CATEGORIES];
+extern bool settings_hotbar_numkey_quick_add;
 extern bool settings_disable_messages;
 extern bool settings_right_click_protect;
 extern bool settings_auto_appraise_new_items;
@@ -133,6 +138,7 @@ static const int SETTINGS_MOUSE_TAB = 3;
 static const int SETTINGS_GAMEPAD_BINDINGS_TAB = 4;
 static const int SETTINGS_GAMEPAD_SETTINGS_TAB = 5;
 static const int SETTINGS_MISC_TAB = 6;
+
 
 //Confirm resolution window stuff.
 extern bool resolutionChanged;
