@@ -4,4 +4,6 @@ Makefile
 cmake_install.cmake
 barony
 editor
+VS.2015/Debug
+VS.2015/Release
 
