@@ -6,4 +6,6 @@ barony
 editor
 VS.2015/Debug
 VS.2015/Release
-
+.Rproj.user
+.Rhistory
+Barony.Rproj
