@@ -482,8 +482,8 @@ void handleMainMenu(bool mode)
 			TTF_SizeUTF8(ttf8, version, &w, &h);
 			ttfPrintTextFormatted(ttf8, xres - 8 - w, yres - 4 - h, "%s", version);
 			int h2 = h;
-			TTF_SizeUTF8(ttf8, VERSION, &w, &h);
-			ttfPrintTextFormatted(ttf8, xres - 8 - w, yres - 8 - h - h2, VERSION);
+			TTF_SizeUTF8(ttf8, "3.0.1-Kornel", &w, &h);
+			ttfPrintTextFormatted(ttf8, xres - 8 - w, yres - 8 - h - h2, "3.0.1-Kornel");
 
 #ifdef STEAMWORKS
 			TTF_SizeUTF8(ttf8, language[2584], &w, &h);
