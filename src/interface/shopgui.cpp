@@ -10,6 +10,7 @@
 -------------------------------------------------------------------------------*/
 
 #include "../main.hpp"
+#include "../draw.hpp"
 #include "../game.hpp"
 #include "../stat.hpp"
 #include "../items.hpp"
@@ -25,7 +26,7 @@ void rebuildShopInventory()
 	for ( node = shopInv->first; node != NULL; node = node->next )
 	{
 		Item* item = (Item*) node->element;
-		if ( shopinventorycategory == 0 && itemCategory(item) != WEAPON )
+		if ( shopinventorycategory == 0 && itemCategory(item) != WEAPON && itemCategory(item) != THROWN )
 		{
 			continue;
 		}
@@ -69,7 +70,7 @@ void rebuildShopInventory()
 		Item* item = (Item*) node->element;
 		if (item)
 		{
-			if ( shopinventorycategory == 0 && itemCategory(item) != WEAPON )
+			if ( shopinventorycategory == 0 && itemCategory(item) != WEAPON && itemCategory(item) != THROWN )
 			{
 				continue;
 			}
@@ -352,7 +353,7 @@ void updateShopWindow()
 		Item* item = (Item*) node->element;
 		if (item)
 		{
-			if ( shopinventorycategory == 0 && itemCategory(item) != WEAPON )
+			if ( shopinventorycategory == 0 && itemCategory(item) != WEAPON && itemCategory(item) != THROWN )
 			{
 				continue;
 			}

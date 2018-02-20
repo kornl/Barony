@@ -10,6 +10,7 @@
 -------------------------------------------------------------------------------*/
 
 #include "../main.hpp"
+#include "../draw.hpp"
 #include "../game.hpp"
 #include "../stat.hpp"
 #include "../items.hpp"
@@ -139,6 +140,21 @@ void drawMinimap()
 						//glEnd();
 					}
 				}
+				else if ( stats[clientnum]->shoes != NULL )
+				{
+					if ( stats[clientnum]->shoes->type == ARTIFACT_BOOTS )
+					{
+						x = floor(entity->x / 16);
+						y = floor(entity->y / 16);
+						glColor4f(.5, .25, .5, 1);
+						//glBegin(GL_QUADS);
+						glVertex2f(x * MINIMAPSCALE + xres - map.width * MINIMAPSCALE, map.height * MINIMAPSCALE - y * MINIMAPSCALE - MINIMAPSCALE);
+						glVertex2f(x * MINIMAPSCALE + xres - map.width * MINIMAPSCALE + MINIMAPSCALE, map.height * MINIMAPSCALE - y * MINIMAPSCALE - MINIMAPSCALE);
+						glVertex2f(x * MINIMAPSCALE + xres - map.width * MINIMAPSCALE + MINIMAPSCALE, map.height * MINIMAPSCALE - y * MINIMAPSCALE);
+						glVertex2f(x * MINIMAPSCALE + xres - map.width * MINIMAPSCALE, map.height * MINIMAPSCALE - y * MINIMAPSCALE);
+						//glEnd();
+					}
+				}
 			}
 			else if ( entity->sprite == 245 )     // boulder.vox
 			{
@@ -161,7 +177,7 @@ void drawMinimap()
 
 	// draw players and allies
 	
-	for ( node = map.entities->first; node != NULL; node = node->next )
+	for ( node = map.creatures->first; node != nullptr; node = node->next )
 	{
 		Entity* entity = (Entity*)node->element;
 		bool drawchar = false;
@@ -177,7 +193,7 @@ void drawMinimap()
 		else if ( entity->behavior == &actMonster )
 		{
 			node_t* node2;
-			for ( node2 = stats[clientnum]->FOLLOWERS.first; node2 != NULL; node2 = node2->next )
+			for ( node2 = stats[clientnum]->FOLLOWERS.first; node2 != nullptr; node2 = node2->next )
 			{
 				if ( *((Uint32*)node2->element) == entity->getUID() )
 				{
@@ -218,7 +234,7 @@ void drawMinimap()
 
 			x = 0;
 			y = 0;
-			for ( i = 0; i < 4; i++ )
+			for ( i = 0; i < 4; ++i )
 			{
 				// move forward
 				if ( cos(entity->yaw) > .4 )
@@ -269,7 +285,7 @@ void drawMinimap()
 	{
 		return;
 	}
-	for ( node = map.entities->first; node != NULL; node = node->next )
+	for ( node = map.creatures->first; node != nullptr; node = node->next )
 	{
 		Entity* entity = (Entity*)node->element;
 		if ( entity->sprite == 239 )
@@ -310,7 +326,7 @@ void drawMinimap()
 
 				x = 0;
 				y = 0;
-				for ( i = 0; i < 4; i++ )
+				for ( i = 0; i < 4; ++i )
 				{
 					// move forward
 					if ( cos(entity->yaw) > .4 )

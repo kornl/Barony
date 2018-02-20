@@ -10,6 +10,7 @@
 -------------------------------------------------------------------------------*/
 
 #include "../main.hpp"
+#include "../files.hpp"
 #include "../game.hpp"
 #include "../stat.hpp"
 #include "../messages.hpp"
@@ -32,6 +33,7 @@ SDL_Surface* hunger_bmp = NULL;
 SDL_Surface* minotaur_bmp = nullptr;
 int textscroll = 0;
 int attributespage = 0;
+int proficienciesPage = 0;
 Item* invitems[4];
 Item* invitemschest[4];
 int inventorycategory = 7; // inventory window defaults to wildcard
@@ -96,9 +98,22 @@ SDL_Surface* attributesright_bmp = NULL;
 SDL_Surface* attributesleftunclicked_bmp = NULL;
 SDL_Surface* attributesrightunclicked_bmp = NULL;
 SDL_Surface* inventory_bmp = NULL, *inventoryoption_bmp = NULL, *inventoryoptionChest_bmp = NULL, *equipped_bmp = NULL;
+SDL_Surface* itembroken_bmp = nullptr;
 //SDL_Surface *category_bmp[NUMCATEGORIES];
 SDL_Surface* shopkeeper_bmp = NULL;
 SDL_Surface* damage_bmp = NULL;
+SDL_Surface *str_bmp64u = NULL;
+SDL_Surface *dex_bmp64u = NULL;
+SDL_Surface *con_bmp64u = NULL;
+SDL_Surface *int_bmp64u = NULL;
+SDL_Surface *per_bmp64u = NULL;
+SDL_Surface *chr_bmp64u = NULL;
+SDL_Surface *str_bmp64 = NULL;
+SDL_Surface *dex_bmp64 = NULL;
+SDL_Surface *con_bmp64 = NULL;
+SDL_Surface *int_bmp64 = NULL;
+SDL_Surface *per_bmp64 = NULL;
+SDL_Surface *chr_bmp64 = NULL;
 int spellscroll = 0;
 int magicspell_list_offset_x = 0;
 int magicspell_list_offset_y = 0;
@@ -120,6 +135,10 @@ bool hotbarHasFocus = false;
 list_t damageIndicators;
 
 bool auto_hotbar_new_items = true;
+bool auto_hotbar_categories[NUM_HOTBAR_CATEGORIES] = {	true, true, true, true, 
+														true, true, true, true,
+														true, true, true, true };
+bool hotbar_numkey_quick_add = false;
 bool disable_messages = false;
 bool right_click_protect = false;
 bool auto_appraise_new_items = false;
@@ -160,6 +179,7 @@ bool loadInterfaceResources()
 	inventory_mode_spell_img = loadImage("images/system/inventory_mode_spell.png");
 	inventory_mode_spell_highlighted_img = loadImage("images/system/inventory_mode_spell_highlighted.png");
 	equipped_bmp = loadImage("images/system/Equipped.png");
+	itembroken_bmp = loadImage("images/system/Broken.png");
 	//sky_bmp=scaleSurface(loadImage("images/system/sky.png"), 1280*(xres/320.0),468*(xres/320.0));
 	/*category_bmp[0]=loadImage("images/system/Weapon.png");
 	category_bmp[1]=loadImage("images/system/Armor.png");
@@ -210,6 +230,19 @@ bool loadInterfaceResources()
 
 	book_highlighted_left_img = loadImage("images/system/bookpageleft-highlighted.png");
 	book_highlighted_right_img = loadImage("images/system/bookpageright-highlighted.png");
+
+	str_bmp64u = loadImage("images/system/str64u.png");
+	dex_bmp64u = loadImage("images/system/dex64u.png");
+	con_bmp64u = loadImage("images/system/con64u.png");
+	int_bmp64u = loadImage("images/system/int64u.png");
+	per_bmp64u = loadImage("images/system/per64u.png");
+	chr_bmp64u = loadImage("images/system/chr64u.png");
+	str_bmp64 = loadImage("images/system/str64.png");
+	dex_bmp64 = loadImage("images/system/dex64.png");
+	con_bmp64 = loadImage("images/system/con64.png");
+	int_bmp64 = loadImage("images/system/int64.png");
+	per_bmp64 = loadImage("images/system/per64.png");
+	chr_bmp64 = loadImage("images/system/chr64.png");
 
 	hotbar_img = loadImage("images/system/hotbar_slot.png");
 	hotbar_spell_img = loadImage("images/system/magic/hotbar_spell.png");
@@ -337,6 +370,10 @@ void freeInterfaceResources()
 	{
 		SDL_FreeSurface(equipped_bmp);
 	}
+	if ( itembroken_bmp != nullptr )
+	{
+		SDL_FreeSurface(itembroken_bmp);
+	}
 	if (inventoryChest_bmp != NULL)
 	{
 		SDL_FreeSurface(inventoryChest_bmp);
@@ -403,6 +440,54 @@ void freeInterfaceResources()
 	if (hotbar_spell_img)
 	{
 		SDL_FreeSurface(hotbar_spell_img);
+	}
+	if ( str_bmp64u )
+	{
+		SDL_FreeSurface(str_bmp64u);
+	}
+	if ( dex_bmp64u )
+	{
+		SDL_FreeSurface(dex_bmp64u);
+	}
+	if ( con_bmp64u )
+	{
+		SDL_FreeSurface(con_bmp64u);
+	}
+	if ( int_bmp64u )
+	{
+		SDL_FreeSurface(int_bmp64u);
+	}
+	if ( per_bmp64u )
+	{
+		SDL_FreeSurface(per_bmp64u);
+	}
+	if ( chr_bmp64u )
+	{
+		SDL_FreeSurface(chr_bmp64u);
+	}
+	if ( str_bmp64 )
+	{
+		SDL_FreeSurface(str_bmp64);
+	}
+	if ( dex_bmp64 )
+	{
+		SDL_FreeSurface(dex_bmp64);
+	}
+	if ( con_bmp64 )
+	{
+		SDL_FreeSurface(con_bmp64);
+	}
+	if ( int_bmp64 )
+	{
+		SDL_FreeSurface(int_bmp64);
+	}
+	if ( per_bmp64 )
+	{
+		SDL_FreeSurface(per_bmp64);
+	}
+	if ( chr_bmp64 )
+	{
+		SDL_FreeSurface(chr_bmp64);
 	}
 	list_FreeAll(&damageIndicators);
 }
@@ -741,6 +826,7 @@ int saveConfig(char* filename)
 	fprintf(fp, "/res %dx%d\n", xres, yres);
 	fprintf(fp, "/gamma %3.3f\n", vidgamma);
 	fprintf(fp, "/fov %d\n", fov);
+	fprintf(fp, "/fps %d\n", fpsLimit);
 	fprintf(fp, "/svflags %d\n", svFlags);
 	if ( lastname != "" )
 	{
@@ -813,6 +899,14 @@ int saveConfig(char* filename)
 	{
 		fprintf(fp, "/disablehotbarnewitems\n");
 	}
+	for ( c = 0; c < NUM_HOTBAR_CATEGORIES; ++c )
+	{
+		fprintf(fp, "/hotbarenablecategory %d %d\n", c, auto_hotbar_categories[c]);
+	}
+	if ( hotbar_numkey_quick_add )
+	{
+		fprintf(fp, "/quickaddtohotbar\n");
+	}
 	if (disable_messages)
 	{
 		fprintf(fp, "/disablemessages\n");
@@ -832,6 +926,10 @@ int saveConfig(char* filename)
 	if (splitscreen)
 	{
 		fprintf(fp, "/splitscreen\n");
+	}
+	if ( useModelCache )
+	{
+		fprintf(fp, "/usemodelcache\n");
 	}
 	fprintf(fp, "/gamepad_deadzone %d\n", gamepad_deadzone);
 	fprintf(fp, "/gamepad_trigger_deadzone %d\n", gamepad_trigger_deadzone);
@@ -1055,4 +1153,5 @@ void openStatusScreen(int whichGUIMode, int whichInventoryMode)
 	mousex = xres / 2;
 	mousey = yres / 2;
 	attributespage = 0;
+	//proficienciesPage = 0;
 }

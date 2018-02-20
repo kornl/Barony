@@ -64,11 +64,13 @@ extern SDL_Surface* attributesleft_bmp, *attributesleftunclicked_bmp;
 extern SDL_Surface* attributesright_bmp, *attributesrightunclicked_bmp;
 extern SDL_Surface* button_bmp, *smallbutton_bmp, *invup_bmp, *invdown_bmp;
 extern SDL_Surface* inventory_bmp, *inventoryoption_bmp, *inventoryoptionChest_bmp, *equipped_bmp;
+extern SDL_Surface* itembroken_bmp;
 //extern SDL_Surface *category_bmp[NUMCATEGORIES];
 extern SDL_Surface* shopkeeper_bmp;
 extern SDL_Surface* damage_bmp;
 extern int textscroll;
 extern int attributespage;
+extern int proficienciesPage;
 extern Item* invitems[4];
 extern Item* invitemschest[4];
 extern int inventorycategory;
@@ -116,6 +118,7 @@ void updateEnemyBar(Entity* source, Entity* target, char* name, Sint32 hp, Sint3
 damageIndicator_t* newDamageIndicator(double x, double y);
 
 void selectItemMenuSlot(const Item& item, int entry);
+bool autoAddHotbarFilter(const Item& item);
 extern Uint32 itemMenuItem;
 extern bool itemMenuOpen;
 extern int itemMenuSelected;
@@ -217,6 +220,7 @@ extern int selectedIdentifySlot;
 void selectIdentifySlot(int slot);
 void warpMouseToSelectedIdentifySlot();
 
+void CloseIdentifyGUI();
 void updateIdentifyGUI(); //Updates the identify item GUI.
 void identifyGUIIdentify(Item* item); //Identify the given item.
 int getAppraisalTime(Item* item); // Return time in ticks needed to appraise an item
@@ -348,6 +352,10 @@ void warpMouseToSelectedHotbarSlot();
  */
 extern bool auto_hotbar_new_items;
 
+extern bool auto_hotbar_categories[NUM_HOTBAR_CATEGORIES]; // true = enable auto add to hotbar. else don't add.
+
+extern bool hotbar_numkey_quick_add; // use number keys to add items to hotbar if mouse in inventory panel.
+
 extern bool disable_messages;
 
 extern bool right_click_protect;
@@ -366,4 +374,21 @@ inline bool hotbarGamepadControlEnabled()
 {
 	return ( !openedChest[clientnum] && gui_mode != GUI_MODE_SHOP && !identifygui_active && !removecursegui_active );
 }
+
+extern SDL_Surface *str_bmp64u;
+extern SDL_Surface *dex_bmp64u;
+extern SDL_Surface *con_bmp64u;
+extern SDL_Surface *int_bmp64u;
+extern SDL_Surface *per_bmp64u;
+extern SDL_Surface *chr_bmp64u;
+extern SDL_Surface *str_bmp64;
+extern SDL_Surface *dex_bmp64;
+extern SDL_Surface *con_bmp64;
+extern SDL_Surface *int_bmp64;
+extern SDL_Surface *per_bmp64;
+extern SDL_Surface *chr_bmp64;
+
+void printStatBonus(TTF_Font* outputFont, Sint32 stat, Sint32 statWithModifiers, int x, int y);
+void attackHoverText(Sint32 input[6]);
+Sint32 displayAttackPower(Sint32 output[6]);
 
